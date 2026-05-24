@@ -1,0 +1,98 @@
+import { TranscriptionConfig } from '../types';
+import { jsonGet, jsonPost, providerRequest, sleep } from '../http';
+import { TranscriptionProvider } from './index';
+
+const POLL_TIMEOUT_MS = 60_000;
+const INITIAL_DELAY_MS = 1000;
+const MAX_DELAY_MS = 8000;
+
+interface UploadResponse {
+	upload_url?: string;
+}
+
+interface TranscriptCreateResponse {
+	id?: string;
+}
+
+interface TranscriptStatusResponse {
+	status?: 'queued' | 'processing' | 'completed' | 'error';
+	text?: string;
+	error?: string;
+}
+
+export function createAssemblyAITranscription(): TranscriptionProvider {
+	return {
+		id: 'assemblyai',
+		requiresAudio: true,
+		async transcribe(
+			audio: Blob,
+			config: TranscriptionConfig,
+			signal?: AbortSignal,
+		): Promise<string> {
+			if (!config.apiKey) throw new Error('assemblyai: API key is not configured');
+			const authHeaders = { Authorization: config.apiKey };
+
+			const uploadBody = await audio.arrayBuffer();
+			const uploadRes = await providerRequest({
+				provider: 'assemblyai',
+				url: 'https://api.assemblyai.com/v2/upload',
+				method: 'POST',
+				headers: { ...authHeaders, 'Content-Type': 'application/octet-stream' },
+				body: uploadBody,
+				signal,
+			});
+			const uploadUrl = (uploadRes.json as UploadResponse).upload_url;
+			if (!uploadUrl) {
+				throw new Error('assemblyai: upload response missing upload_url');
+			}
+
+			const createBody: Record<string, unknown> = { audio_url: uploadUrl };
+			if (config.model) createBody.speech_model = config.model;
+			if (config.language) createBody.language_code = config.language;
+			const created = await jsonPost<TranscriptCreateResponse>(
+				'assemblyai',
+				'https://api.assemblyai.com/v2/transcript',
+				createBody,
+				authHeaders,
+				signal,
+			);
+			if (!created.id) {
+				throw new Error('assemblyai: transcript request missing id');
+			}
+
+			return pollAssemblyAI(created.id, authHeaders, signal);
+		},
+	};
+}
+
+async function pollAssemblyAI(
+	id: string,
+	headers: Record<string, string>,
+	signal: AbortSignal | undefined,
+): Promise<string> {
+	const start = Date.now();
+	let delay = INITIAL_DELAY_MS;
+	for (;;) {
+		const elapsed = Date.now() - start;
+		if (elapsed > POLL_TIMEOUT_MS) {
+			throw new Error(`assemblyai: poll timeout after ${POLL_TIMEOUT_MS / 1000}s`);
+		}
+		const status = await jsonGet<TranscriptStatusResponse>(
+			'assemblyai',
+			`https://api.assemblyai.com/v2/transcript/${id}`,
+			headers,
+			signal,
+		);
+		if (status.status === 'completed') {
+			if (typeof status.text !== 'string') {
+				throw new Error('assemblyai: completed response missing text');
+			}
+			return status.text.trim();
+		}
+		if (status.status === 'error') {
+			throw new Error(`assemblyai: ${status.error ?? 'transcription failed'}`);
+		}
+		await sleep(delay, signal);
+		delay = Math.min(delay * 2, MAX_DELAY_MS);
+	}
+}
