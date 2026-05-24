@@ -10,6 +10,7 @@ import {
 	TranscriptionProviderID,
 } from '../types';
 import { loadAllKeys, saveManyKeys } from '../secrets';
+import { freshDefaultTemplates } from './default-templates';
 
 const EMPTY_TRANSCRIPTION_CONFIG: TranscriptionConfig = {
 	apiKey: '',
@@ -80,6 +81,12 @@ function profileLLMKeyId(kind: ActiveProfileKind): string {
 export async function loadSettings(plugin: Plugin): Promise<GlobalSettings> {
 	const stored = (await plugin.loadData()) as Partial<GlobalSettings> | null;
 	const merged = mergeSettings(DEFAULT_SETTINGS, stored ?? {});
+	if (merged.templates.length === 0) {
+		merged.templates = freshDefaultTemplates();
+		if (!merged.defaultTemplateId) {
+			merged.defaultTemplateId = merged.templates[0]?.id ?? '';
+		}
+	}
 	await hydrateSecrets(plugin, merged);
 	return merged;
 }
