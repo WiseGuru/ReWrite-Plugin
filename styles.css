@@ -161,3 +161,45 @@
 .rewrite-settings .rewrite-templates-actions {
 	margin-top: 8px;
 }
+
+/* Quick record floating mini-UI */
+
+.rewrite-quick-floater {
+	position: fixed;
+	bottom: 24px;
+	right: 24px;
+	z-index: 9999;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 12px;
+	background-color: var(--background-secondary);
+	color: var(--text-normal);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	box-shadow: var(--shadow-s);
+	font-size: var(--font-ui-small);
+}
+
+.rewrite-quick-floater .rewrite-quick-dot {
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	background-color: var(--color-red);
+	animation: rewrite-pulse 1s ease-in-out infinite;
+}
+
+.rewrite-quick-floater.is-busy .rewrite-quick-dot {
+	background-color: var(--color-orange);
+	animation: none;
+}
+
+.rewrite-quick-floater .rewrite-quick-timer {
+	font-variant-numeric: tabular-nums;
+	min-width: 4ch;
+}
+
+.rewrite-quick-floater .rewrite-quick-stop,
+.rewrite-quick-floater .rewrite-quick-cancel {
+	padding: 2px 8px;
+}
