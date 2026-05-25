@@ -1,5 +1,5 @@
 import { TranscriptionConfig } from '../types';
-import { providerRequest } from '../http';
+import { jsonGet, providerRequest } from '../http';
 import { TranscriptionProvider } from './index';
 
 interface DeepgramResponse {
@@ -8,6 +8,10 @@ interface DeepgramResponse {
 			alternatives?: Array<{ transcript?: string }>;
 		}>;
 	};
+}
+
+interface DeepgramModelsResponse {
+	stt?: Array<{ canonical_name?: unknown; name?: unknown }>;
 }
 
 export function createDeepgramTranscription(): TranscriptionProvider {
@@ -45,6 +49,23 @@ export function createDeepgramTranscription(): TranscriptionProvider {
 				throw new Error('deepgram: response missing transcript');
 			}
 			return transcript.trim();
+		},
+		async listModels(config, signal) {
+			if (!config.apiKey) throw new Error('deepgram: API key is not configured');
+			const response = await jsonGet<DeepgramModelsResponse>(
+				'deepgram',
+				'https://api.deepgram.com/v1/models',
+				{ Authorization: `Token ${config.apiKey}` },
+				signal,
+			);
+			const seen = new Set<string>();
+			for (const row of response.stt ?? []) {
+				const id = typeof row.canonical_name === 'string'
+					? row.canonical_name
+					: typeof row.name === 'string' ? row.name : '';
+				if (id) seen.add(id);
+			}
+			return [...seen].sort();
 		},
 	};
 }

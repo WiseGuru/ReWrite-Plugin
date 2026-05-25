@@ -1,11 +1,20 @@
 import { LLMConfig } from '../types';
-import { jsonPost } from '../http';
+import { jsonGet, jsonPost } from '../http';
 import { LLMProvider } from './index';
 
 interface MessagesResponse {
 	content?: Array<{ type?: string; text?: string }>;
 	stop_reason?: string;
 }
+
+interface ModelsListResponse {
+	data?: Array<{ id?: unknown }>;
+}
+
+const ANTHROPIC_HEADERS = {
+	'anthropic-version': '2023-06-01',
+	'anthropic-dangerous-direct-browser-access': 'true',
+};
 
 export function createAnthropicLLM(): LLMProvider {
 	return {
@@ -30,8 +39,7 @@ export function createAnthropicLLM(): LLMProvider {
 				body,
 				{
 					'x-api-key': config.apiKey,
-					'anthropic-version': '2023-06-01',
-					'anthropic-dangerous-direct-browser-access': 'true',
+					...ANTHROPIC_HEADERS,
 				},
 				signal,
 			);
@@ -40,6 +48,24 @@ export function createAnthropicLLM(): LLMProvider {
 				throw new Error(`anthropic: response missing text content (stop_reason=${response.stop_reason ?? 'unknown'})`);
 			}
 			return firstText.text.trim();
+		},
+		async listModels(config, signal) {
+			if (!config.apiKey) throw new Error('anthropic: API key is not configured');
+			const response = await jsonGet<ModelsListResponse>(
+				'anthropic',
+				'https://api.anthropic.com/v1/models?limit=1000',
+				{
+					'x-api-key': config.apiKey,
+					...ANTHROPIC_HEADERS,
+				},
+				signal,
+			);
+			const out: string[] = [];
+			for (const row of response.data ?? []) {
+				if (typeof row.id === 'string' && row.id) out.push(row.id);
+			}
+			out.sort();
+			return out;
 		},
 	};
 }

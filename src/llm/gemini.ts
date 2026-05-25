@@ -1,5 +1,5 @@
 import { LLMConfig } from '../types';
-import { jsonPost } from '../http';
+import { jsonGet, jsonPost } from '../http';
 import { LLMProvider } from './index';
 
 interface GenerateContentResponse {
@@ -8,6 +8,13 @@ interface GenerateContentResponse {
 		finishReason?: string;
 	}>;
 	promptFeedback?: { blockReason?: string };
+}
+
+interface GeminiModelsResponse {
+	models?: Array<{
+		name?: unknown;
+		supportedGenerationMethods?: unknown;
+	}>;
 }
 
 export function createGeminiLLM(): LLMProvider {
@@ -48,6 +55,24 @@ export function createGeminiLLM(): LLMProvider {
 				throw new Error(`gemini: response missing text (finishReason=${candidate?.finishReason ?? 'unknown'})`);
 			}
 			return text.trim();
+		},
+		async listModels(config, signal) {
+			if (!config.apiKey) throw new Error('gemini: API key is not configured');
+			const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(config.apiKey)}&pageSize=1000`;
+			const response = await jsonGet<GeminiModelsResponse>('gemini', url, {}, signal);
+			const out: string[] = [];
+			for (const row of response.models ?? []) {
+				const methods = Array.isArray(row.supportedGenerationMethods)
+					? row.supportedGenerationMethods.filter((m): m is string => typeof m === 'string')
+					: [];
+				if (!methods.includes('generateContent')) continue;
+				const name = typeof row.name === 'string' ? row.name : '';
+				if (!name) continue;
+				const stripped = name.startsWith('models/') ? name.slice('models/'.length) : name;
+				out.push(stripped);
+			}
+			out.sort();
+			return out;
 		},
 	};
 }

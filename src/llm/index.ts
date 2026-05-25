@@ -11,6 +11,7 @@ export interface LLMProvider {
 		config: LLMConfig,
 		signal?: AbortSignal,
 	): Promise<string>;
+	listModels?(config: LLMConfig, signal?: AbortSignal): Promise<string[]>;
 }
 
 export function createLLMProvider(id: LLMProviderID): LLMProvider {

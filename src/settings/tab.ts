@@ -5,12 +5,16 @@ import {
 	ActiveProfileOverride,
 	EnvironmentProfile,
 	InsertMode,
+	LLMConfig,
 	LLMProviderID,
 	NoteTemplate,
 	RecordingFormatPreference,
+	TranscriptionConfig,
 	TranscriptionProviderID,
 } from '../types';
 import { detectActiveProfileKind } from '../platform';
+import { createTranscriptionProvider } from '../transcription';
+import { createLLMProvider } from '../llm';
 
 const TRANSCRIPTION_OPTIONS: Array<{ id: TranscriptionProviderID; label: string }> = [
 	{ id: 'openai', label: 'OpenAI Whisper' },
@@ -121,16 +125,7 @@ export class ReWriteSettingTab extends PluginSettingTab {
 			});
 
 		if (profile.transcriptionProvider !== 'webspeech') {
-			new Setting(parent)
-				.setName('Transcription model')
-				.setDesc(transcriptionModelHint(profile.transcriptionProvider))
-				.addText((t) => {
-					t.setValue(profile.transcriptionConfig.model);
-					t.onChange(async (v) => {
-						profile.transcriptionConfig.model = v;
-						await this.commit();
-					});
-				});
+			this.renderTranscriptionModelField(parent, profile);
 
 			if (profile.transcriptionProvider === 'openai-compatible') {
 				new Setting(parent)
@@ -170,16 +165,7 @@ export class ReWriteSettingTab extends PluginSettingTab {
 				});
 			});
 
-		new Setting(parent)
-			.setName('LLM model')
-			.setDesc(llmModelHint(profile.llmProvider))
-			.addText((t) => {
-				t.setValue(profile.llmConfig.model);
-				t.onChange(async (v) => {
-					profile.llmConfig.model = v;
-					await this.commit();
-				});
-			});
+		this.renderLLMModelField(parent, profile);
 
 		if (profile.llmProvider === 'openai-compatible') {
 			new Setting(parent)
@@ -238,6 +224,130 @@ export class ReWriteSettingTab extends PluginSettingTab {
 					await this.commit();
 				});
 			});
+	}
+
+	private renderTranscriptionModelField(parent: HTMLElement, profile: EnvironmentProfile): void {
+		const wrapper = parent.createDiv({ cls: 'rewrite-model-field' });
+		this.populateTranscriptionModelField(wrapper, profile);
+	}
+
+	private populateTranscriptionModelField(wrapper: HTMLElement, profile: EnvironmentProfile): void {
+		wrapper.empty();
+		const providerId = profile.transcriptionProvider;
+		const provider = createTranscriptionProvider(providerId);
+		const supportsList = typeof provider.listModels === 'function';
+		const cached = this.plugin.settings.modelCache.transcription[providerId]?.ids ?? [];
+		const current = profile.transcriptionConfig.model;
+
+		const setting = new Setting(wrapper).setName('Transcription model');
+		setting.setDesc(modelFieldDesc(transcriptionModelHint(providerId), supportsList, cached.length));
+
+		if (supportsList) {
+			setting.addDropdown((dd) => {
+				dd.addOption('', cached.length === 0 ? '(no cached models)' : '(pick a model)');
+				for (const id of cached) dd.addOption(id, id);
+				dd.setValue(cached.includes(current) ? current : '');
+				dd.onChange(async (v) => {
+					if (!v) return;
+					profile.transcriptionConfig.model = v;
+					await this.commit();
+					this.populateTranscriptionModelField(wrapper, profile);
+				});
+			});
+			setting.addExtraButton((b) => {
+				b.setIcon('refresh-cw').setTooltip('Refresh model list').onClick(async () => {
+					await this.refreshTranscriptionModels(providerId, profile.transcriptionConfig);
+					this.populateTranscriptionModelField(wrapper, profile);
+				});
+			});
+		}
+
+		setting.addText((t) => {
+			t.setValue(current);
+			t.setPlaceholder(supportsList ? '' : transcriptionModelHint(providerId));
+			t.onChange(async (v) => {
+				profile.transcriptionConfig.model = v;
+				await this.commit();
+			});
+		});
+	}
+
+	private renderLLMModelField(parent: HTMLElement, profile: EnvironmentProfile): void {
+		const wrapper = parent.createDiv({ cls: 'rewrite-model-field' });
+		this.populateLLMModelField(wrapper, profile);
+	}
+
+	private populateLLMModelField(wrapper: HTMLElement, profile: EnvironmentProfile): void {
+		wrapper.empty();
+		const providerId = profile.llmProvider;
+		const provider = createLLMProvider(providerId);
+		const supportsList = typeof provider.listModels === 'function';
+		const cached = this.plugin.settings.modelCache.llm[providerId]?.ids ?? [];
+		const current = profile.llmConfig.model;
+
+		const setting = new Setting(wrapper).setName('LLM model');
+		setting.setDesc(modelFieldDesc(llmModelHint(providerId), supportsList, cached.length));
+
+		if (supportsList) {
+			setting.addDropdown((dd) => {
+				dd.addOption('', cached.length === 0 ? '(no cached models)' : '(pick a model)');
+				for (const id of cached) dd.addOption(id, id);
+				dd.setValue(cached.includes(current) ? current : '');
+				dd.onChange(async (v) => {
+					if (!v) return;
+					profile.llmConfig.model = v;
+					await this.commit();
+					this.populateLLMModelField(wrapper, profile);
+				});
+			});
+			setting.addExtraButton((b) => {
+				b.setIcon('refresh-cw').setTooltip('Refresh model list').onClick(async () => {
+					await this.refreshLLMModels(providerId, profile.llmConfig);
+					this.populateLLMModelField(wrapper, profile);
+				});
+			});
+		}
+
+		setting.addText((t) => {
+			t.setValue(current);
+			t.setPlaceholder(supportsList ? '' : llmModelHint(providerId));
+			t.onChange(async (v) => {
+				profile.llmConfig.model = v;
+				await this.commit();
+			});
+		});
+	}
+
+	private async refreshTranscriptionModels(
+		providerId: TranscriptionProviderID,
+		config: TranscriptionConfig,
+	): Promise<void> {
+		const provider = createTranscriptionProvider(providerId);
+		if (!provider.listModels) return;
+		try {
+			const ids = await provider.listModels(config);
+			this.plugin.settings.modelCache.transcription[providerId] = { ids, fetchedAt: Date.now() };
+			await this.commit();
+			new Notice(`ReWrite: refreshed ${ids.length} ${providerId} models.`);
+		} catch (e) {
+			new Notice(`ReWrite: refresh failed. ${e instanceof Error ? e.message : String(e)}`);
+		}
+	}
+
+	private async refreshLLMModels(
+		providerId: LLMProviderID,
+		config: LLMConfig,
+	): Promise<void> {
+		const provider = createLLMProvider(providerId);
+		if (!provider.listModels) return;
+		try {
+			const ids = await provider.listModels(config);
+			this.plugin.settings.modelCache.llm[providerId] = { ids, fetchedAt: Date.now() };
+			await this.commit();
+			new Notice(`ReWrite: refreshed ${ids.length} ${providerId} models.`);
+		} catch (e) {
+			new Notice(`ReWrite: refresh failed. ${e instanceof Error ? e.message : String(e)}`);
+		}
 	}
 
 	private renderTemplates(parent: HTMLElement): void {
@@ -476,6 +586,12 @@ class ConfirmModal extends Modal {
 
 function generateTemplateId(): string {
 	return `tpl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function modelFieldDesc(hint: string, supportsList: boolean, cachedCount: number): string {
+	if (!supportsList) return hint;
+	if (cachedCount === 0) return `${hint} Or click Refresh to load models from the provider.`;
+	return `${hint} Pick from the dropdown, or type a custom model name.`;
 }
 
 function transcriptionModelHint(id: TranscriptionProviderID): string {

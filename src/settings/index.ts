@@ -47,6 +47,7 @@ export const DEFAULT_SETTINGS: GlobalSettings = {
 	lastUsedTemplateId: '',
 	recordingFormat: 'webm',
 	templates: [],
+	modelCache: { transcription: {}, llm: {} },
 };
 
 const PROFILE_KINDS: ActiveProfileKind[] = ['desktop', 'mobile'];
@@ -129,6 +130,10 @@ function mergeSettings(
 		desktopProfile: mergeProfile(base.desktopProfile, partial.desktopProfile),
 		mobileProfile: mergeProfile(base.mobileProfile, partial.mobileProfile),
 		templates: partial.templates ?? base.templates,
+		modelCache: {
+			transcription: { ...base.modelCache.transcription, ...(partial.modelCache?.transcription ?? {}) },
+			llm: { ...base.modelCache.llm, ...(partial.modelCache?.llm ?? {}) },
+		},
 	};
 }
 

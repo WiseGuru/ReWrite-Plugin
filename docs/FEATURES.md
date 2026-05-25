@@ -4,26 +4,7 @@ Forward-looking backlog. Not committed to a release. Add items as they come up; 
 
 ## Open
 
-### 1. LLM model field as a dropdown of available models
-
-**Current state:** [src/settings/tab.ts:197-206](../src/settings/tab.ts#L197-L206) renders "LLM model" as a free-text input with a hint string from `llmModelHint()`. Same shape for "Transcription model" at [src/settings/tab.ts:136-145](../src/settings/tab.ts#L136-L145).
-
-**Desired:** dropdown populated with models the configured provider actually exposes, instead of asking the user to type a model ID correctly.
-
-**Open design questions (decide when picking this up):**
-
-- **Source of the list.** Two options:
-  1. *Live fetch* per provider. OpenAI has `GET /v1/models`, Anthropic has `GET /v1/models` (recent), Gemini has `GET /v1beta/models`, Mistral has `GET /v1/models`, Groq mirrors OpenAI, `openai-compatible` mirrors OpenAI. Pros: always current, surfaces user's actual entitlements. Cons: requires the API key to already be set before model selection, adds a network call to the settings tab, needs caching + a refresh button, needs graceful degradation when offline.
-  2. *Static curated list* baked into each adapter, refreshed when we ship updates. Pros: works without a key, instant. Cons: stale list problem (this plugin's whole reason for existing is that model names move fast).
-- **Recommended:** live fetch with on-disk cache (in `data.json`, per provider family, with timestamp), a "Refresh models" button next to the dropdown, and a "Custom..." escape hatch that falls back to free-text. Cache TTL ~7 days. If the fetch fails (no key, offline, 401), show the cached list if any, otherwise fall back to free-text with the current hint.
-- **Same treatment for transcription model?** Yes, for the providers that expose it (OpenAI Whisper has limited models; AssemblyAI has tiers; Deepgram has many; Groq mirrors OpenAI; `openai-compatible` and `revai` should stay free-text since the namespace is user-controlled).
-- **Per-profile vs. global cache?** Global per provider family — the model list doesn't depend on which profile you're configuring.
-
-**Touch points:** [src/settings/tab.ts](../src/settings/tab.ts) (UI), per-provider adapter files under [src/llm/](../src/llm/) and [src/transcription/](../src/transcription/) (add `listModels(config)`), [src/types.ts](../src/types.ts) (cache shape on `GlobalSettings`).
-
----
-
-### 2. Plugin-managed local whisper.cpp server (desktop)
+### 1. Plugin-managed local whisper.cpp server (desktop)
 
 **Goal:** let a desktop user run fully on-device transcription with whisper.cpp without ever opening a terminal during normal use. Plugin spawns the server, plugin tears it down, pipeline talks to it via the existing `openai-compatible` adapter under the hood.
 
@@ -75,6 +56,10 @@ Once Phase A is solid:
 ---
 
 ## Done
+
+### Model field as a dropdown of available models
+
+Added an optional `listModels(config, signal)` method to both `TranscriptionProvider` and `LLMProvider` interfaces. Implementations: OpenAI / Groq / Mistral (shared via the OpenAI-shaped adapter), Anthropic, Gemini, Deepgram. Skipped (text-only fallback): `openai-compatible` (URL-specific, list-shape varies), AssemblyAI, Rev.ai, Web Speech. Settings tab renders a hybrid Setting per model: dropdown of cached models + Refresh button (when the provider supports listing) plus an always-canonical text input that wins for "Custom" model names not yet in the dropdown. Cache lives at `GlobalSettings.modelCache.{transcription,llm}[providerId] = { ids, fetchedAt }`. No auto-fetch on settings open; the user clicks Refresh once their key is set. Errors surface via Notice with the provider-attributed `ProviderError` message.
 
 ### Act on existing text in a note
 

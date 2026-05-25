@@ -13,6 +13,7 @@ export interface TranscriptionProvider {
 		config: TranscriptionConfig,
 		signal?: AbortSignal,
 	): Promise<string>;
+	listModels?(config: TranscriptionConfig, signal?: AbortSignal): Promise<string[]>;
 }
 
 export function createTranscriptionProvider(

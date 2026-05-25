@@ -1,11 +1,15 @@
 import { TranscriptionConfig, TranscriptionProviderID } from '../types';
-import { MultipartPart, multipartPost } from '../http';
+import { jsonGet, MultipartPart, multipartPost } from '../http';
 import { audioFilename, TranscriptionProvider } from './index';
+
+interface ModelsListResponse {
+	data?: Array<{ id?: unknown }>;
+}
 
 export function createOpenAITranscription(
 	id: TranscriptionProviderID,
 ): TranscriptionProvider {
-	return {
+	const provider: TranscriptionProvider = {
 		id,
 		requiresAudio: true,
 		async transcribe(
@@ -41,6 +45,36 @@ export function createOpenAITranscription(
 			return res.text.trim();
 		},
 	};
+
+	if (id !== 'openai-compatible') {
+		provider.listModels = async (config, signal) => {
+			if (!config.apiKey) throw new Error(`${id}: API key is not configured`);
+			const url = id === 'groq'
+				? 'https://api.groq.com/openai/v1/models'
+				: 'https://api.openai.com/v1/models';
+			const response = await jsonGet<ModelsListResponse>(
+				id,
+				url,
+				{ Authorization: `Bearer ${config.apiKey}` },
+				signal,
+			);
+			return filterAudioTranscriptionModels(response.data ?? []);
+		};
+	}
+
+	return provider;
+}
+
+function filterAudioTranscriptionModels(rows: Array<{ id?: unknown }>): string[] {
+	const out: string[] = [];
+	for (const row of rows) {
+		const id = typeof row.id === 'string' ? row.id : '';
+		if (!id) continue;
+		const lower = id.toLowerCase();
+		if (lower.includes('whisper') || lower.includes('transcribe')) out.push(id);
+	}
+	out.sort();
+	return out;
 }
 
 function resolveEndpoint(id: TranscriptionProviderID, config: TranscriptionConfig): string {

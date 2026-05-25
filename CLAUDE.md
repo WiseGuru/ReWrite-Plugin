@@ -93,6 +93,8 @@ The `PipelineSource` union has four variants: `audio` (recorded blob), `paste` (
 
 API keys are stored per profile on `EnvironmentProfile.transcriptionConfig.apiKey` / `llmConfig.apiKey`. Two slots per profile, one for transcription and one for the LLM. No global by-family map; the desktop and mobile profiles each carry their own keys even when both use the same provider (deliberate: per-profile keys make per-function usage tracking easier). Persistence is in [src/secrets.ts](src/secrets.ts) using the key IDs `profile:desktop:transcription`, `profile:desktop:llm`, `profile:mobile:transcription`, `profile:mobile:llm`.
 
+Providers may optionally implement `listModels(config, signal)` returning a string array of model IDs the configured API key can access. Implemented by: OpenAI / Groq / Mistral (via `openai.ts` shared adapter), Anthropic, Gemini, Deepgram. Not implemented for `openai-compatible` (URL-specific, list-shape varies), AssemblyAI, Rev.ai, Web Speech. The settings tab caches results to `GlobalSettings.modelCache` per side and provider ID; the Refresh button in the model field triggers `listModels` and updates the cache. The text field next to the dropdown is always the canonical source of `profile.config.model` so users can type any string the dropdown doesn't expose.
+
 ## Settings
 
 `GlobalSettings` (defined in [src/types.ts](src/types.ts)) is the shape of `data.json`. Loading flow:

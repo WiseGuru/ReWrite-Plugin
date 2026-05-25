@@ -1,5 +1,5 @@
 import { LLMConfig, LLMProviderID } from '../types';
-import { jsonPost } from '../http';
+import { jsonGet, jsonPost } from '../http';
 import { LLMProvider } from './index';
 
 interface ChatCompletionResponse {
@@ -8,8 +8,12 @@ interface ChatCompletionResponse {
 	}>;
 }
 
+interface ModelsListResponse {
+	data?: Array<{ id?: unknown }>;
+}
+
 export function createOpenAILLM(id: LLMProviderID): LLMProvider {
-	return {
+	const provider: LLMProvider = {
 		id,
 		async complete(
 			systemPrompt: string,
@@ -42,6 +46,41 @@ export function createOpenAILLM(id: LLMProviderID): LLMProvider {
 			return content.trim();
 		},
 	};
+
+	if (id !== 'openai-compatible') {
+		provider.listModels = async (config, signal) => {
+			if (!config.apiKey) throw new Error(`${id}: API key is not configured`);
+			const url = id === 'mistral'
+				? 'https://api.mistral.ai/v1/models'
+				: 'https://api.openai.com/v1/models';
+			const response = await jsonGet<ModelsListResponse>(
+				id,
+				url,
+				{ Authorization: `Bearer ${config.apiKey}` },
+				signal,
+			);
+			return filterChatModels(response.data ?? []);
+		};
+	}
+
+	return provider;
+}
+
+function filterChatModels(rows: Array<{ id?: unknown }>): string[] {
+	const out: string[] = [];
+	for (const row of rows) {
+		const id = typeof row.id === 'string' ? row.id : '';
+		if (!id) continue;
+		const lower = id.toLowerCase();
+		if (lower.includes('whisper') || lower.includes('embedding')) continue;
+		if (lower.includes('transcribe') || lower.includes('tts')) continue;
+		if (lower.includes('dall-e') || lower.includes('image')) continue;
+		if (lower.includes('audio') || lower.includes('speech')) continue;
+		if (lower.includes('moderation') || lower.includes('search')) continue;
+		out.push(id);
+	}
+	out.sort();
+	return out;
 }
 
 function resolveEndpoint(id: LLMProviderID, config: LLMConfig): string {

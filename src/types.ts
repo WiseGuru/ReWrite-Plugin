@@ -51,6 +51,16 @@ export type ActiveProfileOverride = 'auto' | 'desktop' | 'mobile';
 export type ActiveProfileKind = 'desktop' | 'mobile';
 export type RecordingFormatPreference = 'webm' | 'mp4';
 
+export interface ModelCacheEntry {
+	ids: string[];
+	fetchedAt: number;
+}
+
+export interface ModelCache {
+	transcription: Partial<Record<TranscriptionProviderID, ModelCacheEntry>>;
+	llm: Partial<Record<LLMProviderID, ModelCacheEntry>>;
+}
+
 export interface GlobalSettings {
 	activeProfileOverride: ActiveProfileOverride;
 	desktopProfile: EnvironmentProfile;
@@ -59,4 +69,5 @@ export interface GlobalSettings {
 	lastUsedTemplateId: string;
 	recordingFormat: RecordingFormatPreference;
 	templates: NoteTemplate[];
+	modelCache: ModelCache;
 }
