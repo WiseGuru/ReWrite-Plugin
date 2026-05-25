@@ -7,7 +7,7 @@ You bring your own provider keys. Nothing is sent to a ReWrite server; the plugi
 ## Features
 
 - Record audio directly in Obsidian, or paste a pre-existing transcript.
-- 6 transcription providers: OpenAI Whisper, OpenAI-compatible (whisper.cpp, faster-whisper-server, etc.), Groq, AssemblyAI, Deepgram, Rev.ai, and the browser-native Web Speech API.
+- 7 transcription providers: OpenAI Whisper, OpenAI-compatible (whisper.cpp, faster-whisper-server, etc.), Groq, AssemblyAI, Deepgram, Rev.ai, the browser-native Web Speech API, and a plugin-managed local whisper.cpp server (desktop).
 - 5 LLM providers for cleanup: Anthropic Claude, OpenAI GPT, OpenAI-compatible (Ollama, LM Studio), Google Gemini, Mistral.
 - Desktop and Mobile profiles, auto-selected by environment with a manual override.
 - 5 starter templates (General cleanup, Todo list, Daily note, Meeting notes, Idea capture); fully editable and reorderable.
@@ -36,6 +36,32 @@ npm run build
 ```
 
 `main.js`, `styles.css`, and `manifest.json` will be at the repo root. Copy them into your vault as described above.
+
+## Local whisper.cpp server (desktop, optional)
+
+If you want fully on-device transcription with no network calls, the plugin can spawn a [whisper.cpp](https://github.com/ggerganov/whisper.cpp) `whisper-server` binary that you supply. The plugin only reads the absolute paths you configure; it never downloads binaries, never looks them up on PATH, and never spawns anything you did not explicitly point it at. Desktop only.
+
+### Disclosure
+
+When you click Start in settings, the plugin launches whisper-server as a child process and communicates with it over loopback (`http://127.0.0.1:<port>`). The process is captured in a ring-buffered log you can view in settings. When you click Stop, or when the plugin is unloaded, the process is terminated. No code is downloaded or executed beyond the binary you provide.
+
+### Setup
+
+1. Download or build whisper.cpp. The repo's [releases page](https://github.com/ggerganov/whisper.cpp/releases) ships prebuilt `whisper-server` binaries for common platforms; or `make server` from a clone.
+2. Download a GGML model file (e.g. `ggml-base.en.bin`, `ggml-small.bin`, `ggml-large-v3.bin`) from [Hugging Face](https://huggingface.co/ggerganov/whisper.cpp/tree/main). Larger models are more accurate and slower.
+3. Open ReWrite settings, scroll to "Local whisper.cpp server (desktop)", and fill in:
+   - Binary path: absolute path to `whisper-server` (or `whisper-server.exe` on Windows).
+   - Model path: absolute path to the `.bin` file.
+   - Port: defaults to 8080.
+4. Click Start. The status indicator transitions from Stopped to Starting to Running. View log shows whisper-server's stdout/stderr if startup fails.
+5. In the profile you want to use it from, set Transcription provider to "Local whisper.cpp (desktop only)". The Transcription model field is decorative for this provider; whisper-server uses whichever model file is loaded at startup.
+
+### Troubleshooting
+
+- **Port already in use**: another process is bound to the configured port. Change the port (or stop the other process). The plugin will not kill processes it did not start.
+- **Antivirus quarantine on Windows**: Windows Defender or third-party AV may flag `whisper-server.exe` on first run. The plugin cannot work around this; whitelist the binary in your AV settings.
+- **Permission denied on macOS or Linux**: ensure the binary is executable (`chmod +x whisper-server`).
+- **Process did not become ready within 5 s**: the model failed to load (file path wrong, file corrupted, RAM exhausted). The log tail will show whisper.cpp's error.
 
 ## Excluding `secrets.json.nosync` from sync
 

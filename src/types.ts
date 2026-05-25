@@ -5,7 +5,8 @@ export type TranscriptionProviderID =
 	| 'assemblyai'
 	| 'deepgram'
 	| 'revai'
-	| 'webspeech';
+	| 'webspeech'
+	| 'whisper-local';
 
 export type LLMProviderID =
 	| 'anthropic'
@@ -61,6 +62,13 @@ export interface ModelCache {
 	llm: Partial<Record<LLMProviderID, ModelCacheEntry>>;
 }
 
+export interface LocalWhisperSettings {
+	binaryPath: string;
+	modelPath: string;
+	port: number;
+	extraArgs: string;
+}
+
 export interface GlobalSettings {
 	activeProfileOverride: ActiveProfileOverride;
 	desktopProfile: EnvironmentProfile;
@@ -70,4 +78,5 @@ export interface GlobalSettings {
 	recordingFormat: RecordingFormatPreference;
 	templates: NoteTemplate[];
 	modelCache: ModelCache;
+	localWhisper: LocalWhisperSettings;
 }

@@ -51,6 +51,7 @@ src/
 ├── webspeech.ts                     # SpeechRecognition wrapper
 ├── pipeline.ts                      # transcribe → cleanup → insert orchestrator
 ├── insert.ts                        # cursor/newFile/append + {{date}}/{{time}} expansion
+├── whisper-host.ts                  # Spawns/stops a user-supplied whisper-server child process (desktop only)
 ├── settings/
 │   ├── index.ts                     # DEFAULT_SETTINGS, load/save, per-profile secret hydration
 │   ├── tab.ts                       # PluginSettingTab: active profile, two profile sections, templates, recording
@@ -67,7 +68,8 @@ src/
 │   ├── assemblyai.ts                # upload → submit → poll
 │   ├── deepgram.ts                  # single POST
 │   ├── revai.ts                     # submit → poll → fetch text
-│   └── webspeech.ts                 # adapter; throws "should not be called" (see Gotchas)
+│   ├── webspeech.ts                 # adapter; throws "should not be called" (see Gotchas)
+│   └── whisper-local.ts             # Thin shim that POSTs to the WhisperHost-managed local server
 └── llm/
     ├── index.ts                     # LLMProvider interface + createLLMProvider()
     ├── openai.ts                    # /v1/chat/completions (also used by openai-compatible + mistral)
@@ -94,6 +96,16 @@ The `PipelineSource` union has four variants: `audio` (recorded blob), `paste` (
 API keys are stored per profile on `EnvironmentProfile.transcriptionConfig.apiKey` / `llmConfig.apiKey`. Two slots per profile, one for transcription and one for the LLM. No global by-family map; the desktop and mobile profiles each carry their own keys even when both use the same provider (deliberate: per-profile keys make per-function usage tracking easier). Persistence is in [src/secrets.ts](src/secrets.ts) using the key IDs `profile:desktop:transcription`, `profile:desktop:llm`, `profile:mobile:transcription`, `profile:mobile:llm`.
 
 Providers may optionally implement `listModels(config, signal)` returning a string array of model IDs the configured API key can access. Implemented by: OpenAI / Groq / Mistral (via `openai.ts` shared adapter), Anthropic, Gemini, Deepgram. Not implemented for `openai-compatible` (URL-specific, list-shape varies), AssemblyAI, Rev.ai, Web Speech. The settings tab caches results to `GlobalSettings.modelCache` per side and provider ID; the Refresh button in the model field triggers `listModels` and updates the cache. The text field next to the dropdown is always the canonical source of `profile.config.model` so users can type any string the dropdown doesn't expose.
+
+## Local whisper.cpp host (desktop)
+
+[src/whisper-host.ts](src/whisper-host.ts) exposes the `WhisperHost` class. The plugin instantiates one in `onload` and stops it in `onunload`. Configuration lives at `GlobalSettings.localWhisper = { binaryPath, modelPath, port, extraArgs }` — all user-supplied. No discovery, no PATH lookup, no auto-download.
+
+`start()` validates the binary and model paths exist via `fs.existsSync`, probes the port via `net.createServer().listen(port)` to detect conflicts, spawns the user's whisper-server with `child_process.spawn`, captures stdout/stderr into a 1 MB ring buffer, then polls `net.createConnection` against the port every 250 ms for up to 5 s before declaring `'running'`. Any failure transitions status to `'crashed'` with the log tail surfaced in the error message. `stop()` sends SIGTERM, waits up to 3 s, then SIGKILL.
+
+The `whisper-local` transcription provider ([src/transcription/whisper-local.ts](src/transcription/whisper-local.ts)) is a thin shim that POSTs to `http://127.0.0.1:<port>/v1/audio/transcriptions` using the same multipart shape as OpenAI Whisper. The shim grabs the host reference via `bindWhisperHost(host)` called from [src/main.ts](src/main.ts) on load. If the host status is anything other than `'running'`, the adapter throws a `ProviderError` with a "start it from settings" message; the pipeline surfaces that as a Notice. No API key is collected for this provider (no auth, no settings field).
+
+Mobile compatibility: `WhisperHost` and the `whisper-local` option are guarded everywhere by `Platform.isDesktop`. Node modules (`child_process`, `net`, `fs`) are lazy-required inside the `Platform.isDesktop` branch, mirroring the [src/secrets.ts](src/secrets.ts) `getSafeStorage` pattern; on mobile the host is inert and the provider option is filtered out of dropdowns in [src/settings/tab.ts](src/settings/tab.ts) and [src/ui/setup-card.ts](src/ui/setup-card.ts).
 
 ## Settings
 
@@ -148,6 +160,9 @@ Per [.editorconfig](.editorconfig): tabs (width 4), LF, UTF-8, final newline. Ma
 - **Default templates re-seed when `templates.length === 0`**, not via a `hasSeeded` flag. This is deliberate: it migrates pre-Phase-11 installs and gives a user who deleted everything a way back to a working state. Stable IDs (`tpl-default-...`) mean re-seed produces no duplicates.
 - **Quick Record uses a custom floating div, not a `Notice`.** Obsidian `Notice` does not support real interactive buttons. The floater is a `position: fixed` div on `document.body`, owned by `QuickRecordController`, with `cancel()` wired into `onunload`.
 - **`secrets.json.nosync` uses the `.nosync` suffix on purpose**: iCloud Drive natively skips any file or folder whose name ends in `.nosync`. The README documents per-tool sync exclusion for other tools.
+- **WhisperHost lazy-requires Node modules** the same way [src/secrets.ts](src/secrets.ts) does for `safeStorage`. Importing `child_process` / `net` / `fs` at module top would crash on mobile load. The cached `nodeApiCache` is `null` on mobile, so any host method that needs it bails with a clear "desktop only" error.
+- **Whisper-host orphan detection is observe-only.** If `start()` finds the configured port already bound (the port-in-use probe fails), it throws a "Port in use. Check Activity Monitor or Task Manager." message. The plugin must NEVER kill a process it didn't start. Surface the conflict; let the user decide.
+- **`onunload` stops the whisper-host fire-and-forget.** `void this.whisperHost?.stop()` — Obsidian's `Plugin.onunload` signature is `() => void`, so we can't await. Stop() sends SIGTERM with a 3 s SIGKILL fallback, but the unload sequence may complete before that. On Obsidian quit, the child dies with the parent process anyway; on plugin disable/reload, a brief orphan window is possible. Don't try to make unload async.
 
 ## Local install for testing
 

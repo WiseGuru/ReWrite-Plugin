@@ -1,4 +1,4 @@
-import { App, Modal, Notice, PluginSettingTab, Setting } from 'obsidian';
+import { App, Modal, Notice, Platform, PluginSettingTab, Setting } from 'obsidian';
 import type ReWritePlugin from '../main';
 import {
 	ActiveProfileKind,
@@ -15,8 +15,9 @@ import {
 import { detectActiveProfileKind } from '../platform';
 import { createTranscriptionProvider } from '../transcription';
 import { createLLMProvider } from '../llm';
+import { WhisperStatus } from '../whisper-host';
 
-const TRANSCRIPTION_OPTIONS: Array<{ id: TranscriptionProviderID; label: string }> = [
+const TRANSCRIPTION_OPTIONS: Array<{ id: TranscriptionProviderID; label: string; desktopOnly?: boolean }> = [
 	{ id: 'openai', label: 'OpenAI Whisper' },
 	{ id: 'openai-compatible', label: 'OpenAI-compatible (local server)' },
 	{ id: 'groq', label: 'Groq' },
@@ -24,6 +25,7 @@ const TRANSCRIPTION_OPTIONS: Array<{ id: TranscriptionProviderID; label: string 
 	{ id: 'deepgram', label: 'Deepgram' },
 	{ id: 'revai', label: 'Rev.ai' },
 	{ id: 'webspeech', label: 'Web Speech (browser)' },
+	{ id: 'whisper-local', label: 'Local whisper.cpp (desktop only)', desktopOnly: true },
 ];
 
 const LLM_OPTIONS: Array<{ id: LLMProviderID; label: string }> = [
@@ -61,6 +63,7 @@ export class ReWriteSettingTab extends PluginSettingTab {
 		this.renderActiveProfile(containerEl);
 		this.renderProfile(containerEl, 'desktop');
 		this.renderProfile(containerEl, 'mobile');
+		this.renderLocalWhisperServer(containerEl);
 		this.renderTemplates(containerEl);
 		this.renderRecording(containerEl);
 	}
@@ -115,7 +118,10 @@ export class ReWriteSettingTab extends PluginSettingTab {
 		new Setting(parent)
 			.setName('Transcription provider')
 			.addDropdown((dd) => {
-				for (const opt of TRANSCRIPTION_OPTIONS) dd.addOption(opt.id, opt.label);
+				for (const opt of TRANSCRIPTION_OPTIONS) {
+					if (opt.desktopOnly && !Platform.isDesktop) continue;
+					dd.addOption(opt.id, opt.label);
+				}
 				dd.setValue(profile.transcriptionProvider);
 				dd.onChange(async (v) => {
 					profile.transcriptionProvider = v as TranscriptionProviderID;
@@ -140,17 +146,19 @@ export class ReWriteSettingTab extends PluginSettingTab {
 					});
 			}
 
-			new Setting(parent)
-				.setName('Transcription API key')
-				.addText((t) => {
-					t.inputEl.type = 'password';
-					t.setPlaceholder('Saved securely on this device');
-					t.setValue(profile.transcriptionConfig.apiKey);
-					t.onChange(async (v) => {
-						profile.transcriptionConfig.apiKey = v;
-						await this.commit();
+			if (profile.transcriptionProvider !== 'whisper-local') {
+				new Setting(parent)
+					.setName('Transcription API key')
+					.addText((t) => {
+						t.inputEl.type = 'password';
+						t.setPlaceholder('Saved securely on this device');
+						t.setValue(profile.transcriptionConfig.apiKey);
+						t.onChange(async (v) => {
+							profile.transcriptionConfig.apiKey = v;
+							await this.commit();
+						});
 					});
-				});
+			}
 		}
 
 		new Setting(parent)
@@ -347,6 +355,99 @@ export class ReWriteSettingTab extends PluginSettingTab {
 			new Notice(`ReWrite: refreshed ${ids.length} ${providerId} models.`);
 		} catch (e) {
 			new Notice(`ReWrite: refresh failed. ${e instanceof Error ? e.message : String(e)}`);
+		}
+	}
+
+	private renderLocalWhisperServer(parent: HTMLElement): void {
+		if (!Platform.isDesktop) return;
+
+		new Setting(parent).setName('Local whisper.cpp server (desktop)').setHeading();
+		parent.createEl('p', {
+			text: 'Spawn a user-supplied whisper-server binary so transcription happens fully on-device. The plugin only reads the paths you provide; it never downloads or discovers binaries.',
+			cls: 'rewrite-section-desc',
+		});
+
+		const cfg = this.plugin.settings.localWhisper;
+
+		new Setting(parent)
+			.setName('Binary path')
+			.setDesc('Absolute path to whisper-server (or whisper-server.exe on Windows).')
+			.addText((t) => {
+				t.setValue(cfg.binaryPath);
+				t.setPlaceholder('/usr/local/bin/whisper-server');
+				t.onChange(async (v) => {
+					cfg.binaryPath = v;
+					await this.commit();
+				});
+			});
+
+		new Setting(parent)
+			.setName('Model path')
+			.setDesc('Absolute path to a GGML/GGUF model file (e.g. ggml-base.en.bin).')
+			.addText((t) => {
+				t.setValue(cfg.modelPath);
+				t.setPlaceholder('/path/to/ggml-base.en.bin');
+				t.onChange(async (v) => {
+					cfg.modelPath = v;
+					await this.commit();
+				});
+			});
+
+		new Setting(parent)
+			.setName('Port')
+			.setDesc('Loopback port the server listens on. Default 8080.')
+			.addText((t) => {
+				t.inputEl.type = 'number';
+				t.setValue(String(cfg.port));
+				t.onChange(async (v) => {
+					const n = Number.parseInt(v, 10);
+					cfg.port = Number.isFinite(n) && n > 0 ? n : 8080;
+					await this.commit();
+				});
+			});
+
+		const advanced = parent.createEl('details', { cls: 'rewrite-advanced' });
+		advanced.createEl('summary', { text: 'Advanced' });
+		new Setting(advanced)
+			.setName('Extra args')
+			.setDesc('Space-separated CLI args appended after -m, --port.')
+			.addText((t) => {
+				t.setValue(cfg.extraArgs);
+				t.onChange(async (v) => {
+					cfg.extraArgs = v;
+					await this.commit();
+				});
+			});
+
+		const host = this.plugin.whisperHost;
+		const status = host.status();
+		const baseUrl = host.baseUrl();
+
+		const statusSetting = new Setting(parent).setName('Status').setDesc(formatWhisperStatus(status, baseUrl));
+		statusSetting.addButton((b) => {
+			if (status === 'running' || status === 'starting') {
+				b.setButtonText('Stop').onClick(async () => {
+					await host.stop();
+					this.display();
+				});
+			} else {
+				b.setButtonText('Start').setCta().onClick(async () => {
+					try {
+						await host.start(cfg);
+					} catch (e) {
+						new Notice(e instanceof Error ? e.message : String(e));
+					}
+					this.display();
+				});
+			}
+		});
+
+		const log = host.getLog();
+		if (log) {
+			const logDetails = parent.createEl('details', { cls: 'rewrite-log-disclosure' });
+			logDetails.createEl('summary', { text: 'View log' });
+			const pre = logDetails.createEl('pre', { cls: 'rewrite-log' });
+			pre.setText(log.slice(-50_000));
 		}
 	}
 
@@ -588,6 +689,19 @@ function generateTemplateId(): string {
 	return `tpl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function formatWhisperStatus(status: WhisperStatus, baseUrl: string | null): string {
+	switch (status) {
+		case 'stopped':
+			return 'Stopped.';
+		case 'starting':
+			return 'Starting...';
+		case 'running':
+			return baseUrl ? `Running on ${baseUrl}.` : 'Running.';
+		case 'crashed':
+			return 'Crashed. See log for details.';
+	}
+}
+
 function modelFieldDesc(hint: string, supportsList: boolean, cachedCount: number): string {
 	if (!supportsList) return hint;
 	if (cachedCount === 0) return `${hint} Or click Refresh to load models from the provider.`;
@@ -608,6 +722,8 @@ function transcriptionModelHint(id: TranscriptionProviderID): string {
 			return 'Optional transcriber name';
 		case 'openai-compatible':
 			return 'Whichever model your local server exposes';
+		case 'whisper-local':
+			return 'Any value works; the loaded model is set at server start.';
 		case 'webspeech':
 			return '';
 	}

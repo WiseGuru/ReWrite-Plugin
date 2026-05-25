@@ -4,6 +4,7 @@ import { createAssemblyAITranscription } from './assemblyai';
 import { createDeepgramTranscription } from './deepgram';
 import { createRevAITranscription } from './revai';
 import { createWebSpeechTranscription } from './webspeech';
+import { createWhisperLocalTranscription } from './whisper-local';
 
 export interface TranscriptionProvider {
 	readonly id: TranscriptionProviderID;
@@ -32,6 +33,8 @@ export function createTranscriptionProvider(
 			return createRevAITranscription();
 		case 'webspeech':
 			return createWebSpeechTranscription();
+		case 'whisper-local':
+			return createWhisperLocalTranscription();
 	}
 }
 

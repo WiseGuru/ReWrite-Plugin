@@ -1,7 +1,7 @@
-import { Setting } from 'obsidian';
+import { Platform, Setting } from 'obsidian';
 import { EnvironmentProfile, LLMProviderID, TranscriptionProviderID } from '../types';
 
-const TRANSCRIPTION_OPTIONS: Array<{ id: TranscriptionProviderID; label: string }> = [
+const TRANSCRIPTION_OPTIONS: Array<{ id: TranscriptionProviderID; label: string; desktopOnly?: boolean }> = [
 	{ id: 'openai', label: 'OpenAI Whisper' },
 	{ id: 'openai-compatible', label: 'OpenAI-compatible (local server)' },
 	{ id: 'groq', label: 'Groq' },
@@ -9,6 +9,7 @@ const TRANSCRIPTION_OPTIONS: Array<{ id: TranscriptionProviderID; label: string 
 	{ id: 'deepgram', label: 'Deepgram' },
 	{ id: 'revai', label: 'Rev.ai' },
 	{ id: 'webspeech', label: 'Web Speech (browser)' },
+	{ id: 'whisper-local', label: 'Local whisper.cpp (desktop only)', desktopOnly: true },
 ];
 
 const LLM_OPTIONS: Array<{ id: LLMProviderID; label: string }> = [
@@ -23,7 +24,7 @@ export function isProfileConfigured(profile: EnvironmentProfile): boolean {
 	const tx = profile.transcriptionProvider;
 	if (tx !== 'webspeech') {
 		if (!profile.transcriptionConfig.model) return false;
-		if (!profile.transcriptionConfig.apiKey) return false;
+		if (tx !== 'whisper-local' && !profile.transcriptionConfig.apiKey) return false;
 		if (tx === 'openai-compatible' && !profile.transcriptionConfig.baseUrl.trim()) return false;
 	}
 	return isProfileConfiguredForText(profile);
@@ -60,7 +61,10 @@ export function renderSetupCard(params: SetupCardParams): void {
 		new Setting(card)
 			.setName('Transcription provider')
 			.addDropdown((dd) => {
-				for (const opt of TRANSCRIPTION_OPTIONS) dd.addOption(opt.id, opt.label);
+				for (const opt of TRANSCRIPTION_OPTIONS) {
+					if (opt.desktopOnly && !Platform.isDesktop) continue;
+					dd.addOption(opt.id, opt.label);
+				}
 				dd.setValue(profile.transcriptionProvider);
 				dd.onChange((v) => {
 					profile.transcriptionProvider = v as TranscriptionProviderID;
@@ -93,12 +97,14 @@ export function renderSetupCard(params: SetupCardParams): void {
 					});
 			}
 
-			renderApiKeyField(card, {
-				label: 'Transcription API key',
-				placeholder: 'Saved securely on this device',
-				getValue: () => profile.transcriptionConfig.apiKey,
-				setValue: (v) => { profile.transcriptionConfig.apiKey = v; },
-			});
+			if (profile.transcriptionProvider !== 'whisper-local') {
+				renderApiKeyField(card, {
+					label: 'Transcription API key',
+					placeholder: 'Saved securely on this device',
+					getValue: () => profile.transcriptionConfig.apiKey,
+					setValue: (v) => { profile.transcriptionConfig.apiKey = v; },
+				});
+			}
 		}
 	}
 
@@ -185,6 +191,8 @@ function modelPlaceholderForTranscription(id: TranscriptionProviderID): string {
 			return 'Optional transcriber name';
 		case 'openai-compatible':
 			return 'Whichever model your local server exposes';
+		case 'whisper-local':
+			return 'Any value works; the loaded model is set at server start';
 		case 'webspeech':
 			return '';
 	}

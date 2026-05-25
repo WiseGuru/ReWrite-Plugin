@@ -6,13 +6,18 @@ import { QuickRecordController, startQuickRecord } from './ui/quick-record';
 import { resolveActiveTextSource, resolveTextFromEditor, runTextPipeline, TextResolution } from './ui/text-source';
 import { TemplatePickerModal } from './ui/template-picker';
 import { GlobalSettings } from './types';
+import { WhisperHost } from './whisper-host';
+import { bindWhisperHost } from './transcription/whisper-local';
 
 export default class ReWritePlugin extends Plugin {
 	settings!: GlobalSettings;
+	whisperHost!: WhisperHost;
 	private activeQuickRecord: QuickRecordController | null = null;
 
 	async onload(): Promise<void> {
 		this.settings = await loadSettings(this);
+		this.whisperHost = new WhisperHost();
+		bindWhisperHost(this.whisperHost);
 		this.addSettingTab(new ReWriteSettingTab(this.app, this));
 
 		this.addRibbonIcon('mic', 'ReWrite', () => {
@@ -57,6 +62,7 @@ export default class ReWritePlugin extends Plugin {
 	onunload(): void {
 		this.activeQuickRecord?.cancel();
 		this.activeQuickRecord = null;
+		void this.whisperHost?.stop();
 	}
 
 	async saveSettings(): Promise<void> {

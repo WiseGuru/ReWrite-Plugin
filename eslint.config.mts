@@ -40,6 +40,7 @@ const REWRITE_BRANDS = [
 	"Groq", "Mistral",
 	"Ollama", "LM Studio",
 	"AssemblyAI", "Deepgram", "Rev.ai",
+	"whisper.cpp", "whisper-server", "faster-whisper-server",
 ];
 
 const REWRITE_ACRONYMS = [

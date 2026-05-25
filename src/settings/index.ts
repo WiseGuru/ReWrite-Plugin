@@ -4,6 +4,7 @@ import {
 	EnvironmentProfile,
 	GlobalSettings,
 	LLMConfig,
+	LocalWhisperSettings,
 	TranscriptionConfig,
 } from '../types';
 import { loadAllKeys, saveManyKeys } from '../secrets';
@@ -39,6 +40,13 @@ const MOBILE_DEFAULT_PROFILE: EnvironmentProfile = {
 	llmConfig: { ...EMPTY_LLM_CONFIG },
 };
 
+const DEFAULT_LOCAL_WHISPER: LocalWhisperSettings = {
+	binaryPath: '',
+	modelPath: '',
+	port: 8080,
+	extraArgs: '',
+};
+
 export const DEFAULT_SETTINGS: GlobalSettings = {
 	activeProfileOverride: 'auto',
 	desktopProfile: DESKTOP_DEFAULT_PROFILE,
@@ -48,6 +56,7 @@ export const DEFAULT_SETTINGS: GlobalSettings = {
 	recordingFormat: 'webm',
 	templates: [],
 	modelCache: { transcription: {}, llm: {} },
+	localWhisper: DEFAULT_LOCAL_WHISPER,
 };
 
 const PROFILE_KINDS: ActiveProfileKind[] = ['desktop', 'mobile'];
@@ -134,6 +143,7 @@ function mergeSettings(
 			transcription: { ...base.modelCache.transcription, ...(partial.modelCache?.transcription ?? {}) },
 			llm: { ...base.modelCache.llm, ...(partial.modelCache?.llm ?? {}) },
 		},
+		localWhisper: { ...base.localWhisper, ...(partial.localWhisper ?? {}) },
 	};
 }
 
