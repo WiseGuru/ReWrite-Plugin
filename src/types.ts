@@ -5,6 +5,7 @@ export type TranscriptionProviderID =
 	| 'assemblyai'
 	| 'deepgram'
 	| 'revai'
+	| 'mistral-voxtral'
 	| 'webspeech'
 	| 'whisper-local';
 

@@ -8,8 +8,6 @@ export interface RecorderResult {
 	durationMs: number;
 }
 
-const MAX_RECORDING_BYTES = 25 * 1024 * 1024;
-
 const WEBM_FIRST: string[] = [
 	'audio/webm;codecs=opus',
 	'audio/webm',
@@ -125,12 +123,6 @@ export class Recorder {
 		const firstChunk = this.chunks[0];
 		const type = this.mimeType || (firstChunk ? firstChunk.type : '') || 'audio/webm';
 		const blob = new Blob(this.chunks, { type });
-		if (blob.size > MAX_RECORDING_BYTES) {
-			const mb = Math.round(blob.size / 1024 / 1024);
-			throw new Error(
-				`Recording is ${mb}MB which exceeds the 25MB transcription limit. Please record a shorter clip.`,
-			);
-		}
 		return { blob, mimeType: type, durationMs: this.accumulatedMs };
 	}
 

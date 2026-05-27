@@ -177,11 +177,11 @@ export class ReWriteModal extends Modal {
 		});
 
 		const summary = details.createEl('summary', { cls: 'rewrite-destination-summary' });
-		const summaryLabel = hasOverride ? 'Custom destination' : 'Default destination';
-		summary.createSpan({ cls: 'rewrite-destination-summary-label', text: `${summaryLabel}: ` });
+		const summaryQualifier = hasOverride ? 'Custom' : 'Default';
+		summary.createSpan({ cls: 'rewrite-destination-summary-label', text: 'Destination: ' });
 		summary.createSpan({
 			cls: 'rewrite-destination-summary-value',
-			text: describeDestination(effectiveMode, effectiveFolder, effectiveName),
+			text: `${summaryQualifier} (${describeDestination(effectiveMode, effectiveFolder, effectiveName)})`,
 		});
 
 		const body = details.createDiv({ cls: 'rewrite-destination-body' });
@@ -404,7 +404,7 @@ export class ReWriteModal extends Modal {
 		if (!this.recorder) throw new Error('No active recording.');
 		const result = await this.recorder.stop();
 		this.recorder = null;
-		return { kind: 'audio', audio: result.blob };
+		return { kind: 'audio', audio: result.blob, durationMs: result.durationMs };
 	}
 
 	private startTimerLoop(timerEl: HTMLElement, isWebSpeech: boolean): void {

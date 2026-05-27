@@ -3,6 +3,7 @@ import { createOpenAITranscription } from './openai';
 import { createAssemblyAITranscription } from './assemblyai';
 import { createDeepgramTranscription } from './deepgram';
 import { createRevAITranscription } from './revai';
+import { createMistralVoxtralTranscription } from './mistral-voxtral';
 import { createWebSpeechTranscription } from './webspeech';
 import { createWhisperLocalTranscription } from './whisper-local';
 
@@ -31,6 +32,8 @@ export function createTranscriptionProvider(
 			return createDeepgramTranscription();
 		case 'revai':
 			return createRevAITranscription();
+		case 'mistral-voxtral':
+			return createMistralVoxtralTranscription();
 		case 'webspeech':
 			return createWebSpeechTranscription();
 		case 'whisper-local':

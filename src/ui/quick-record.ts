@@ -113,7 +113,7 @@ export class QuickRecordController {
 		if (!this.recorder) throw new Error('No active recording.');
 		const result = await this.recorder.stop();
 		this.recorder = null;
-		return { kind: 'audio', audio: result.blob };
+		return { kind: 'audio', audio: result.blob, durationMs: result.durationMs };
 	}
 
 	private stopTimer(): void {

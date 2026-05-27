@@ -37,7 +37,7 @@ const REWRITE_BRANDS = [
 	"OpenAI", "Whisper",
 	"Anthropic", "Claude",
 	"Google Gemini", "Gemini",
-	"Groq", "Mistral",
+	"Groq", "Mistral", "Voxtral",
 	"Ollama", "LM Studio",
 	"AssemblyAI", "Deepgram", "Rev.ai",
 	"whisper.cpp", "whisper-server", "faster-whisper-server",

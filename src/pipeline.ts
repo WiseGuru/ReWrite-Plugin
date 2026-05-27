@@ -1,6 +1,7 @@
 import { App, Notice } from 'obsidian';
 import { DestinationOverride, EnvironmentProfile, GlobalSettings, NoteTemplate, PipelineHost } from './types';
 import { createTranscriptionProvider } from './transcription';
+import { validateRecording } from './transcription/limits';
 import { createLLMProvider } from './llm';
 import { insertOutput, InsertResult } from './insert';
 import { persistAudio } from './audio-persist';
@@ -11,7 +12,7 @@ import { buildKnownNounsSystemPromptSection } from './known-nouns';
 export type PipelineStage = 'persist-audio' | 'transcribe' | 'cleanup' | 'insert';
 
 export type PipelineSource =
-	| { kind: 'audio'; audio: Blob; sourcePath?: string }
+	| { kind: 'audio'; audio: Blob; sourcePath?: string; durationMs?: number }
 	| { kind: 'paste'; text: string }
 	| { kind: 'webspeech'; transcript: string }
 	| { kind: 'text'; text: string };
@@ -89,6 +90,7 @@ async function collectTranscript(params: PipelineParams): Promise<string> {
 		case 'webspeech':
 			return source.transcript;
 		case 'audio': {
+			validateRecording(source.audio.size, source.durationMs, params.profile.transcriptionProvider);
 			params.onStage?.('transcribe');
 			const provider = createTranscriptionProvider(params.profile.transcriptionProvider);
 			return provider.transcribe(source.audio, params.profile.transcriptionConfig, params.signal);

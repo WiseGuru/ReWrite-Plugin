@@ -12,6 +12,40 @@ Phase A shipped (see Done). Remaining work:
 - "Stop when idle for N minutes" toggle (default off; useful for the large-v3 user who doesn't want 1.5 GB resident all day).
 - Process supervision hardening based on real-world Phase A usage (zombies, orphans, signal handling differences across platforms).
 
+### 2. Mobile API management UX
+
+Editing keys, base URLs, and model strings on mobile is rough. Two concrete issues plus one visual ask:
+
+- The two profile sections in [src/settings/tab.ts](../src/settings/tab.ts) render identically, so it's easy to edit the desktop profile while sitting on the phone. Add a visual differentiator (color accent, badge, or border on the active-on-this-device profile) so the mobile vs desktop section is unmistakable.
+- The settings tab re-renders the entire container on dropdown changes (provider, insertMode, activeProfileOverride per [CLAUDE.md](../CLAUDE.md)'s Gotchas), which on mobile causes a visible scroll jump after committing a text field that sits next to a dropdown. Text fields already skip the re-render; audit whether any newer fields slipped into the redraw path and consider scrolling the focused row back into view after redraw.
+- On mobile the on-screen keyboard frequently covers the input that just received focus. Likely needs a `scrollIntoView({ block: 'center' })` on the active control's focus/blur events, or a `keyboardWillShow`-equivalent hook through Obsidian's API.
+
+### 3. (Bug) Voxtral transcription model dropdown is empty
+
+[src/transcription/mistral-voxtral.ts](../src/transcription/mistral-voxtral.ts) does not implement `listModels`, so the Refresh button on the model field is a no-op for the Voxtral transcription provider. Mistral's `/v1/models` returns the full catalog including chat models; filter to audio/Voxtral capability (probably `id.includes('voxtral')` for a v1) when surfacing transcription model IDs. Cross-check: the LLM-side Mistral provider already uses the shared OpenAI adapter's listing, so this gap is transcription-only.
+
+### 4. Real-time transcription mode (live STT, no cleanup)
+
+Voxtral exposes a real-time STT model that doesn't accept whole-file uploads, and a few other providers have equivalents (Deepgram streaming, AssemblyAI realtime). Investigate adding an opt-in "Real-time" mode:
+
+- Bound to a command/shortcut only (no main-modal entry, no template, no LLM cleanup pass).
+- Inserts the live transcript at the cursor as it streams, on both mobile and desktop.
+- Provider-side gating: only enable for transcription providers that expose a realtime endpoint; document which.
+- Honest assessment: this is lower-value than the rest of the plugin (transcript with no cleanup is what Obsidian's existing voice plugins already do). Ship only if users ask.
+
+### 5. (Bug) Web Speech repeats short phrases indefinitely
+
+The Web Speech adapter in [src/webspeech.ts](../src/webspeech.ts) currently loops short utterances: the same phrase is repeated over and over instead of producing one transcript line. Likely cause is the interim-result accumulator concatenating without deduping against final results, or the restart-on-end logic re-emitting buffered interim text. Needs investigation. Until fixed, document Web Speech as a "do not use" option in the README (or remove it from the provider dropdown).
+
+### 6. Daily-note template: how far can the prompt drive a structured fill?
+
+The current daily-note default template is a freeform cleanup. Investigate whether the system prompt can reliably lay the transcript into a real structured daily-note template with named sections (Mood / Highlights / Tasks / Tomorrow / etc.) rather than emitting prose. References:
+
+- https://dannb.org/blog/2022/obsidian-daily-note-template/
+- https://www.craft.do/templates/category/daily-notes
+
+Open questions: do we ship this as an updated default template (prompt-only), or extend `NoteTemplate` to carry a target-template path the LLM should fill into? If the latter, that's a real schema change and needs design work first. Either way, validate on at least one of the linked templates before committing to a format.
+
 ---
 
 ## Done

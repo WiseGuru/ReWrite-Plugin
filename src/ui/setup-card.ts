@@ -8,6 +8,7 @@ const TRANSCRIPTION_OPTIONS: Array<{ id: TranscriptionProviderID; label: string;
 	{ id: 'assemblyai', label: 'AssemblyAI' },
 	{ id: 'deepgram', label: 'Deepgram' },
 	{ id: 'revai', label: 'Rev.ai' },
+	{ id: 'mistral-voxtral', label: 'Mistral Voxtral' },
 	{ id: 'webspeech', label: 'Web Speech (browser)' },
 	{ id: 'whisper-local', label: 'Local whisper.cpp (desktop only)', desktopOnly: true },
 ];
@@ -189,6 +190,8 @@ function modelPlaceholderForTranscription(id: TranscriptionProviderID): string {
 			return 'e.g. nova-2 or nova-3';
 		case 'revai':
 			return 'Optional transcriber name';
+		case 'mistral-voxtral':
+			return 'e.g. voxtral-mini-latest or voxtral-small-latest';
 		case 'openai-compatible':
 			return 'Whichever model your local server exposes';
 		case 'whisper-local':
