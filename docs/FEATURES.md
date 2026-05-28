@@ -12,19 +12,14 @@ Phase A shipped (see Done). Remaining work:
 - "Stop when idle for N minutes" toggle (default off; useful for the large-v3 user who doesn't want 1.5 GB resident all day).
 - Process supervision hardening based on real-world Phase A usage (zombies, orphans, signal handling differences across platforms).
 
-### 2. Mobile API management UX
+### 2. Mobile API management UX — remaining sub-issues
 
-Editing keys, base URLs, and model strings on mobile is rough. Two concrete issues plus one visual ask:
+The visual differentiator (border + badge + collapsed inactive profile) shipped in Done. Two adjacent items still open:
 
-- The two profile sections in [src/settings/tab.ts](../src/settings/tab.ts) render identically, so it's easy to edit the desktop profile while sitting on the phone. Add a visual differentiator (color accent, badge, or border on the active-on-this-device profile) so the mobile vs desktop section is unmistakable.
 - The settings tab re-renders the entire container on dropdown changes (provider, insertMode, activeProfileOverride per [CLAUDE.md](../CLAUDE.md)'s Gotchas), which on mobile causes a visible scroll jump after committing a text field that sits next to a dropdown. Text fields already skip the re-render; audit whether any newer fields slipped into the redraw path and consider scrolling the focused row back into view after redraw.
-- On mobile the on-screen keyboard frequently covers the input that just received focus. Likely needs a `scrollIntoView({ block: 'center' })` on the active control's focus/blur events, or a `keyboardWillShow`-equivalent hook through Obsidian's API.
+- On mobile the on-screen keyboard frequently covers the input that just received focus. Likely needs a `scrollIntoView({ block: 'center' })` on the active control's focus/blur events, or a `keyboardWillShow`-equivalent hook through Obsidian's API. Needs device testing to characterize which fields, when on focus vs blur vs commit.
 
-### 3. (Bug) Voxtral transcription model dropdown is empty
-
-[src/transcription/mistral-voxtral.ts](../src/transcription/mistral-voxtral.ts) does not implement `listModels`, so the Refresh button on the model field is a no-op for the Voxtral transcription provider. Mistral's `/v1/models` returns the full catalog including chat models; filter to audio/Voxtral capability (probably `id.includes('voxtral')` for a v1) when surfacing transcription model IDs. Cross-check: the LLM-side Mistral provider already uses the shared OpenAI adapter's listing, so this gap is transcription-only.
-
-### 4. Real-time transcription mode (live STT, no cleanup)
+### 3. Real-time transcription mode (live STT, no cleanup)
 
 Voxtral exposes a real-time STT model that doesn't accept whole-file uploads, and a few other providers have equivalents (Deepgram streaming, AssemblyAI realtime). Investigate adding an opt-in "Real-time" mode:
 
@@ -33,11 +28,7 @@ Voxtral exposes a real-time STT model that doesn't accept whole-file uploads, an
 - Provider-side gating: only enable for transcription providers that expose a realtime endpoint; document which.
 - Honest assessment: this is lower-value than the rest of the plugin (transcript with no cleanup is what Obsidian's existing voice plugins already do). Ship only if users ask.
 
-### 5. (Bug) Web Speech repeats short phrases indefinitely
-
-The Web Speech adapter in [src/webspeech.ts](../src/webspeech.ts) currently loops short utterances: the same phrase is repeated over and over instead of producing one transcript line. Likely cause is the interim-result accumulator concatenating without deduping against final results, or the restart-on-end logic re-emitting buffered interim text. Needs investigation. Until fixed, document Web Speech as a "do not use" option in the README (or remove it from the provider dropdown).
-
-### 6. Daily-note template: how far can the prompt drive a structured fill?
+### 4. Daily-note template: how far can the prompt drive a structured fill?
 
 The current daily-note default template is a freeform cleanup. Investigate whether the system prompt can reliably lay the transcript into a real structured daily-note template with named sections (Mood / Highlights / Tasks / Tomorrow / etc.) rather than emitting prose. References:
 
@@ -49,6 +40,18 @@ Open questions: do we ship this as an updated default template (prompt-only), or
 ---
 
 ## Done
+
+### Visual differentiation between desktop and mobile profile sections
+
+[src/settings/tab.ts](../src/settings/tab.ts) `renderProfile()` now wraps each profile's settings in a `.rewrite-profile-section` div. The active-on-this-device profile (resolved via `detectActiveProfileKind` from [src/platform.ts](../src/platform.ts)) gets an `is-active-profile` modifier that adds an accent-colored left border, plus a `.rewrite-profile-active-badge` span inserted into the heading's `nameEl` reading "Active on this device". The inactive profile's body (everything below the heading) is rendered inside a `<details class="rewrite-profile-collapsed">` collapsed by default, with a "Show settings" summary. Expanded state lives on `ReWriteSettingTab.inactiveProfileExpanded` so it survives the full-container redraws triggered by provider/insertMode/activeProfileOverride dropdowns. New CSS classes in [styles.css](../styles.css): `.rewrite-profile-section`, `.rewrite-profile-section.is-active-profile`, `.rewrite-profile-active-badge`, `.rewrite-profile-collapsed`. The mobile keyboard-cover and scroll-jump sub-items from the original issue are deferred (see Open) pending device testing.
+
+### Voxtral transcription model dropdown populates
+
+[src/transcription/mistral-voxtral.ts](../src/transcription/mistral-voxtral.ts) gained a `listModels` method that fetches `https://api.mistral.ai/v1/models` and filters to IDs containing `voxtral` (case-insensitive), sorted. The shape mirrors the listModels in [src/transcription/openai.ts](../src/transcription/openai.ts), but stays a local filter rather than extending `filterAudioTranscriptionModels` (which is hardcoded to whisper/transcribe and owned by the OpenAI/Groq path). The settings tab's existing model-field dropdown + Refresh button pick up the new method automatically through the `typeof provider.listModels === 'function'` check.
+
+### Removed the Web Speech transcription provider
+
+The browser-native Web Speech API option (`'webspeech'`) is gone. An earlier idempotency fix to `src/webspeech.ts` stopped the "short phrase repeats indefinitely" symptom, but field testing showed the underlying provider still produced garbled output and froze after a few seconds, with no path to a reliable experience. With six remote providers plus local whisper.cpp covering both platforms, Web Speech wasn't worth keeping as a viable option. Removed: `src/webspeech.ts`, `src/transcription/webspeech.ts`, the `'webspeech'` variant of `TranscriptionProviderID`, the `'webspeech'` variant of `PipelineSource`, `isWebSpeechAvailable()` in [src/platform.ts](../src/platform.ts), the dropdown entry in [src/settings/tab.ts](../src/settings/tab.ts) and [src/ui/setup-card.ts](../src/ui/setup-card.ts), all `transcriptionProvider !== 'webspeech'` conditionals in those files, the Web Speech branches in [src/ui/modal.ts](../src/ui/modal.ts) and [src/ui/quick-record.ts](../src/ui/quick-record.ts), the `isWebSpeech` constructor param on `QuickRecordController`, the `webspeech` case in [src/transcription/limits.ts](../src/transcription/limits.ts), and all CLAUDE.md / README / eslint-config references. The mobile default `transcriptionProvider` changed from `'webspeech'` to `'openai'`. Pre-release rule: no migration code; dev installs with old data should delete `data.json`.
 
 ### Mode selector on the Quick Record floater
 

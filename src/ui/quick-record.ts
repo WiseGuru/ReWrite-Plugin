@@ -1,42 +1,30 @@
 import { Notice } from 'obsidian';
 import type ReWritePlugin from '../main';
 import { PipelineSource, PipelineStage, runPipeline } from '../pipeline';
-import { isMediaRecorderAvailable, isWebSpeechAvailable, resolveActiveProfile } from '../platform';
+import { isMediaRecorderAvailable, resolveActiveProfile } from '../platform';
 import { Recorder } from '../recorder';
-import { startWebSpeech, WebSpeechSession } from '../webspeech';
 import { NoteTemplate } from '../types';
 import { isProfileConfigured } from './setup-card';
 import { ReWriteModal } from './modal';
 
 export class QuickRecordController {
 	private recorder: Recorder | null = null;
-	private webSpeech: WebSpeechSession | null = null;
 	private timerHandle: number | null = null;
 	private floater: QuickRecordFloater | null = null;
 	private settled = false;
-	private startedAt = 0;
 	private template: NoteTemplate;
 
 	constructor(
 		private readonly plugin: ReWritePlugin,
 		template: NoteTemplate,
-		private readonly isWebSpeech: boolean,
 		private readonly onDispose: () => void,
 	) {
 		this.template = template;
 	}
 
 	async begin(): Promise<void> {
-		const { profile } = resolveActiveProfile(this.plugin.settings);
-		if (this.isWebSpeech) {
-			this.webSpeech = startWebSpeech({
-				language: profile.transcriptionConfig.language || undefined,
-			});
-		} else {
-			this.recorder = new Recorder();
-			await this.recorder.start(this.plugin.settings.recordingFormat);
-		}
-		this.startedAt = Date.now();
+		this.recorder = new Recorder();
+		await this.recorder.start(this.plugin.settings.recordingFormat);
 		this.floater = new QuickRecordFloater({
 			onStop: () => {
 				void this.finish();
@@ -51,9 +39,7 @@ export class QuickRecordController {
 			initialTemplateName: this.template.name,
 		});
 		this.timerHandle = window.setInterval(() => {
-			const ms = this.isWebSpeech
-				? Date.now() - this.startedAt
-				: this.recorder?.getElapsedMs() ?? 0;
+			const ms = this.recorder?.getElapsedMs() ?? 0;
 			this.floater?.setTime(formatDuration(ms));
 		}, 250);
 	}
@@ -64,8 +50,6 @@ export class QuickRecordController {
 		this.stopTimer();
 		this.recorder?.cancel();
 		this.recorder = null;
-		this.webSpeech?.cancel();
-		this.webSpeech = null;
 		this.floater?.dispose();
 		this.floater = null;
 		this.onDispose();
@@ -105,11 +89,6 @@ export class QuickRecordController {
 	}
 
 	private async endCapture(): Promise<PipelineSource> {
-		if (this.isWebSpeech) {
-			const transcript = (await this.webSpeech?.stop()) ?? '';
-			this.webSpeech = null;
-			return { kind: 'webspeech', transcript };
-		}
 		if (!this.recorder) throw new Error('No active recording.');
 		const result = await this.recorder.stop();
 		this.recorder = null;
@@ -137,6 +116,12 @@ export async function startQuickRecord(
 		return null;
 	}
 
+	if (profile.transcriptionProvider === 'none') {
+		new Notice('ReWrite: transcription is disabled for this profile. Opening the modal so you can paste text instead.');
+		new ReWriteModal(plugin.app, plugin).open();
+		return null;
+	}
+
 	if (!isProfileConfigured(profile)) {
 		new Notice('ReWrite: profile is not configured. Finish setup to use quick record.');
 		new ReWriteModal(plugin.app, plugin).open();
@@ -150,19 +135,13 @@ export async function startQuickRecord(
 		return null;
 	}
 
-	const isWebSpeech = profile.transcriptionProvider === 'webspeech';
-	if (isWebSpeech && !isWebSpeechAvailable()) {
-		new Notice('Web Speech is not available here. Opening the modal instead.');
-		new ReWriteModal(plugin.app, plugin).open();
-		return null;
-	}
-	if (!isWebSpeech && !isMediaRecorderAvailable()) {
+	if (!isMediaRecorderAvailable()) {
 		new Notice('Audio recording is not supported in this environment. Opening the modal instead.');
 		new ReWriteModal(plugin.app, plugin).open();
 		return null;
 	}
 
-	const controller = new QuickRecordController(plugin, template, isWebSpeech, onDispose);
+	const controller = new QuickRecordController(plugin, template, onDispose);
 	try {
 		await controller.begin();
 	} catch (e) {

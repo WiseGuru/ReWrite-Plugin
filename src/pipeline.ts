@@ -14,7 +14,6 @@ export type PipelineStage = 'persist-audio' | 'transcribe' | 'cleanup' | 'insert
 export type PipelineSource =
 	| { kind: 'audio'; audio: Blob; sourcePath?: string; durationMs?: number }
 	| { kind: 'paste'; text: string }
-	| { kind: 'webspeech'; transcript: string }
 	| { kind: 'text'; text: string };
 
 export interface PipelineParams {
@@ -87,9 +86,10 @@ async function collectTranscript(params: PipelineParams): Promise<string> {
 		case 'paste':
 		case 'text':
 			return source.text;
-		case 'webspeech':
-			return source.transcript;
 		case 'audio': {
+			if (params.profile.transcriptionProvider === 'none') {
+				throw new Error('Transcription is disabled (provider set to None). Use the Paste or From note tab instead.');
+			}
 			validateRecording(source.audio.size, source.durationMs, params.profile.transcriptionProvider);
 			params.onStage?.('transcribe');
 			const provider = createTranscriptionProvider(params.profile.transcriptionProvider);
@@ -99,6 +99,12 @@ async function collectTranscript(params: PipelineParams): Promise<string> {
 }
 
 async function cleanupTranscript(params: PipelineParams, transcript: string): Promise<string> {
+	// LLM=none: insert the transcript as-is. Skips wake-name extraction and
+	// known-nouns injection too, because both only matter when an LLM consumes
+	// the system prompt.
+	if (params.profile.llmProvider === 'none') {
+		return transcript;
+	}
 	let systemPrompt = params.template.prompt;
 	let workingTranscript = transcript;
 	if (params.settings.adHocInstructionsEnabled && params.settings.assistantName.trim().length > 0) {

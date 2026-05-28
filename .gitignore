@@ -18,6 +18,11 @@ main.js
 # obsidian
 data.json
 
+# Secrets: API keys live in secrets.json.nosync (any encryption mode).
+# The .nosync suffix is for iCloud; git needs its own ignore rule.
+secrets.json*
+*.nosync
+
 # Exclude macOS Finder (System Explorer) View States
 .DS_Store
 

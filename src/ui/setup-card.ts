@@ -9,8 +9,8 @@ const TRANSCRIPTION_OPTIONS: Array<{ id: TranscriptionProviderID; label: string;
 	{ id: 'deepgram', label: 'Deepgram' },
 	{ id: 'revai', label: 'Rev.ai' },
 	{ id: 'mistral-voxtral', label: 'Mistral Voxtral' },
-	{ id: 'webspeech', label: 'Web Speech (browser)' },
 	{ id: 'whisper-local', label: 'Local whisper.cpp (desktop only)', desktopOnly: true },
+	{ id: 'none', label: 'None (text-only; recording disabled)' },
 ];
 
 const LLM_OPTIONS: Array<{ id: LLMProviderID; label: string }> = [
@@ -19,11 +19,12 @@ const LLM_OPTIONS: Array<{ id: LLMProviderID; label: string }> = [
 	{ id: 'openai-compatible', label: 'OpenAI-compatible (local server)' },
 	{ id: 'gemini', label: 'Google Gemini' },
 	{ id: 'mistral', label: 'Mistral' },
+	{ id: 'none', label: 'None (skip cleanup; insert raw text)' },
 ];
 
 export function isProfileConfigured(profile: EnvironmentProfile): boolean {
 	const tx = profile.transcriptionProvider;
-	if (tx !== 'webspeech') {
+	if (tx !== 'none') {
 		if (!profile.transcriptionConfig.model) return false;
 		if (tx !== 'whisper-local' && !profile.transcriptionConfig.apiKey) return false;
 		if (tx === 'openai-compatible' && !profile.transcriptionConfig.baseUrl.trim()) return false;
@@ -32,6 +33,7 @@ export function isProfileConfigured(profile: EnvironmentProfile): boolean {
 }
 
 export function isProfileConfiguredForText(profile: EnvironmentProfile): boolean {
+	if (profile.llmProvider === 'none') return true;
 	if (!profile.llmConfig.model) return false;
 	if (!profile.llmConfig.apiKey) return false;
 	if (profile.llmProvider === 'openai-compatible' && !profile.llmConfig.baseUrl.trim()) return false;
@@ -75,7 +77,7 @@ export function renderSetupCard(params: SetupCardParams): void {
 				});
 			});
 
-		if (profile.transcriptionProvider !== 'webspeech') {
+		if (profile.transcriptionProvider !== 'none') {
 			new Setting(card)
 				.setName('Transcription model')
 				.setDesc(modelPlaceholderForTranscription(profile.transcriptionProvider))
@@ -122,34 +124,36 @@ export function renderSetupCard(params: SetupCardParams): void {
 			});
 		});
 
-	new Setting(card)
-		.setName('LLM model')
-		.setDesc(modelPlaceholderForLLM(profile.llmProvider))
-		.addText((t) => {
-			t.setValue(profile.llmConfig.model);
-			t.onChange((v) => {
-				profile.llmConfig.model = v;
-			});
-		});
-
-	if (profile.llmProvider === 'openai-compatible') {
+	if (profile.llmProvider !== 'none') {
 		new Setting(card)
-			.setName('LLM base URL')
-			.setDesc('e.g. http://localhost:11434/v1 (Ollama) or http://localhost:1234/v1 (LM Studio)')
+			.setName('LLM model')
+			.setDesc(modelPlaceholderForLLM(profile.llmProvider))
 			.addText((t) => {
-				t.setValue(profile.llmConfig.baseUrl);
+				t.setValue(profile.llmConfig.model);
 				t.onChange((v) => {
-					profile.llmConfig.baseUrl = v;
+					profile.llmConfig.model = v;
 				});
 			});
-	}
 
-	renderApiKeyField(card, {
-		label: 'LLM API key',
-		placeholder: 'Saved securely on this device',
-		getValue: () => profile.llmConfig.apiKey,
-		setValue: (v) => { profile.llmConfig.apiKey = v; },
-	});
+		if (profile.llmProvider === 'openai-compatible') {
+			new Setting(card)
+				.setName('LLM base URL')
+				.setDesc('e.g. http://localhost:11434/v1 (Ollama) or http://localhost:1234/v1 (LM Studio)')
+				.addText((t) => {
+					t.setValue(profile.llmConfig.baseUrl);
+					t.onChange((v) => {
+						profile.llmConfig.baseUrl = v;
+					});
+				});
+		}
+
+		renderApiKeyField(card, {
+			label: 'LLM API key',
+			placeholder: 'Saved securely on this device',
+			getValue: () => profile.llmConfig.apiKey,
+			setValue: (v) => { profile.llmConfig.apiKey = v; },
+		});
+	}
 
 	const actions = card.createDiv({ cls: 'rewrite-setup-actions' });
 	const saveBtn = actions.createEl('button', { text: 'Save and continue', cls: 'mod-cta' });
@@ -180,6 +184,8 @@ function renderApiKeyField(container: HTMLElement, field: KeyField): void {
 
 function modelPlaceholderForTranscription(id: TranscriptionProviderID): string {
 	switch (id) {
+		case 'none':
+			return '';
 		case 'openai':
 			return 'e.g. whisper-1';
 		case 'groq':
@@ -196,13 +202,13 @@ function modelPlaceholderForTranscription(id: TranscriptionProviderID): string {
 			return 'Whichever model your local server exposes';
 		case 'whisper-local':
 			return 'Any value works; the loaded model is set at server start';
-		case 'webspeech':
-			return '';
 	}
 }
 
 function modelPlaceholderForLLM(id: LLMProviderID): string {
 	switch (id) {
+		case 'none':
+			return '';
 		case 'anthropic':
 			return 'e.g. claude-sonnet-4-5 or claude-haiku-4-5-20251001';
 		case 'openai':

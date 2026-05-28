@@ -11,7 +11,7 @@ import {
 	TranscriptionConfig,
 	TranscriptionProviderID,
 } from '../types';
-import { detectActiveProfileKind } from '../platform';
+import { detectActiveProfileKind, installMobileKeyboardScrollFix } from '../platform';
 import { createTranscriptionProvider } from '../transcription';
 import { createLLMProvider } from '../llm';
 import { formatWhisperStatus } from '../whisper-host';
@@ -30,8 +30,8 @@ const TRANSCRIPTION_OPTIONS: Array<{ id: TranscriptionProviderID; label: string;
 	{ id: 'deepgram', label: 'Deepgram' },
 	{ id: 'revai', label: 'Rev.ai' },
 	{ id: 'mistral-voxtral', label: 'Mistral Voxtral' },
-	{ id: 'webspeech', label: 'Web Speech (browser)' },
 	{ id: 'whisper-local', label: 'Local whisper.cpp (desktop only)', desktopOnly: true },
+	{ id: 'none', label: 'None (text-only; recording disabled)' },
 ];
 
 const LLM_OPTIONS: Array<{ id: LLMProviderID; label: string }> = [
@@ -40,6 +40,7 @@ const LLM_OPTIONS: Array<{ id: LLMProviderID; label: string }> = [
 	{ id: 'openai-compatible', label: 'OpenAI-compatible (local server)' },
 	{ id: 'gemini', label: 'Google Gemini' },
 	{ id: 'mistral', label: 'Mistral' },
+	{ id: 'none', label: 'None (skip cleanup; insert raw text)' },
 ];
 
 const RECORDING_FORMAT_OPTIONS: Array<{ id: RecordingFormatPreference; label: string }> = [
@@ -48,6 +49,12 @@ const RECORDING_FORMAT_OPTIONS: Array<{ id: RecordingFormatPreference; label: st
 ];
 
 export class ReWriteSettingTab extends PluginSettingTab {
+	// Tracks whether the inactive-on-this-device profile is expanded. Survives
+	// the full-container redraws that fire when dropdowns toggle conditional
+	// fields (provider, insertMode, activeProfileOverride).
+	private inactiveProfileExpanded = false;
+	private keyboardScrollFixInstalled = false;
+
 	constructor(app: App, private readonly plugin: ReWritePlugin) {
 		super(app, plugin);
 	}
@@ -56,6 +63,12 @@ export class ReWriteSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 		containerEl.addClass('rewrite-settings');
+
+		// containerEl is reused across display() calls, so install once.
+		if (!this.keyboardScrollFixInstalled) {
+			installMobileKeyboardScrollFix(containerEl);
+			this.keyboardScrollFixInstalled = true;
+		}
 
 		this.renderEncryption(containerEl);
 		this.renderActiveProfile(containerEl);
@@ -245,9 +258,33 @@ export class ReWriteSettingTab extends PluginSettingTab {
 			? this.plugin.settings.desktopProfile
 			: this.plugin.settings.mobileProfile;
 		const title = kind === 'desktop' ? 'Desktop profile' : 'Mobile profile';
-		new Setting(parent).setName(title).setHeading();
+		const isActive = detectActiveProfileKind(this.plugin.settings) === kind;
 
-		new Setting(parent)
+		const section = parent.createDiv({ cls: 'rewrite-profile-section' });
+		if (isActive) section.addClass('is-active-profile');
+
+		const heading = new Setting(section).setName(title).setHeading();
+		if (isActive) {
+			heading.nameEl.createSpan({
+				cls: 'rewrite-profile-active-badge',
+				text: 'Active on this device',
+			});
+		}
+
+		let body: HTMLElement;
+		if (isActive) {
+			body = section;
+		} else {
+			const details = section.createEl('details', { cls: 'rewrite-profile-collapsed' });
+			details.open = this.inactiveProfileExpanded;
+			details.addEventListener('toggle', () => {
+				this.inactiveProfileExpanded = details.open;
+			});
+			details.createEl('summary', { text: 'Show settings' });
+			body = details;
+		}
+
+		new Setting(body)
 			.setName('Profile label')
 			.setDesc('Display name for this profile.')
 			.addText((t) => {
@@ -258,7 +295,7 @@ export class ReWriteSettingTab extends PluginSettingTab {
 				});
 			});
 
-		new Setting(parent)
+		new Setting(body)
 			.setName('Transcription provider')
 			.addDropdown((dd) => {
 				for (const opt of TRANSCRIPTION_OPTIONS) {
@@ -273,11 +310,11 @@ export class ReWriteSettingTab extends PluginSettingTab {
 				});
 			});
 
-		if (profile.transcriptionProvider !== 'webspeech') {
-			this.renderTranscriptionModelField(parent, profile);
+		if (profile.transcriptionProvider !== 'none') {
+			this.renderTranscriptionModelField(body, profile);
 
 			if (profile.transcriptionProvider === 'openai-compatible') {
-				new Setting(parent)
+				new Setting(body)
 					.setName('Transcription base URL')
 					.setDesc('e.g. http://localhost:8080 (whisper.cpp, faster-whisper-server)')
 					.addText((t) => {
@@ -290,7 +327,7 @@ export class ReWriteSettingTab extends PluginSettingTab {
 			}
 
 			if (profile.transcriptionProvider !== 'whisper-local') {
-				new Setting(parent)
+				new Setting(body)
 					.setName('Transcription API key')
 					.addText((t) => {
 						t.inputEl.type = 'password';
@@ -306,7 +343,7 @@ export class ReWriteSettingTab extends PluginSettingTab {
 			}
 		}
 
-		new Setting(parent)
+		new Setting(body)
 			.setName('LLM provider')
 			.addDropdown((dd) => {
 				for (const opt of LLM_OPTIONS) dd.addOption(opt.id, opt.label);
@@ -318,43 +355,47 @@ export class ReWriteSettingTab extends PluginSettingTab {
 				});
 			});
 
-		this.renderLLMModelField(parent, profile);
+		if (profile.llmProvider !== 'none') {
+			this.renderLLMModelField(body, profile);
 
-		if (profile.llmProvider === 'openai-compatible') {
-			new Setting(parent)
-				.setName('LLM base URL')
-				.setDesc('e.g. http://localhost:11434/v1 (Ollama) or http://localhost:1234/v1 (LM Studio)')
+			if (profile.llmProvider === 'openai-compatible') {
+				new Setting(body)
+					.setName('LLM base URL')
+					.setDesc('e.g. http://localhost:11434/v1 (Ollama) or http://localhost:1234/v1 (LM Studio)')
+					.addText((t) => {
+						t.setValue(profile.llmConfig.baseUrl);
+						t.onChange(async (v) => {
+							profile.llmConfig.baseUrl = v;
+							await this.commit();
+						});
+					});
+			}
+
+			new Setting(body)
+				.setName('LLM API key')
 				.addText((t) => {
-					t.setValue(profile.llmConfig.baseUrl);
+					t.inputEl.type = 'password';
+					this.applyApiKeyFieldState(t.inputEl);
+					t.setPlaceholder(this.apiKeyPlaceholder());
+					t.setValue(profile.llmConfig.apiKey);
 					t.onChange(async (v) => {
-						profile.llmConfig.baseUrl = v;
+						if (this.plugin.encryptionStatus.locked) return;
+						profile.llmConfig.apiKey = v;
 						await this.commit();
 					});
 				});
 		}
 
-		new Setting(parent)
-			.setName('LLM API key')
-			.addText((t) => {
-				t.inputEl.type = 'password';
-				this.applyApiKeyFieldState(t.inputEl);
-				t.setPlaceholder(this.apiKeyPlaceholder());
-				t.setValue(profile.llmConfig.apiKey);
-				t.onChange(async (v) => {
-					if (this.plugin.encryptionStatus.locked) return;
-					profile.llmConfig.apiKey = v;
-					await this.commit();
-				});
-			});
-
-		this.renderProfileAdvanced(parent, profile);
+		this.renderProfileAdvanced(body, profile);
 	}
 
 	private renderProfileAdvanced(parent: HTMLElement, profile: EnvironmentProfile): void {
+		if (profile.transcriptionProvider === 'none' && profile.llmProvider === 'none') return;
+
 		const details = parent.createEl('details', { cls: 'rewrite-advanced' });
 		details.createEl('summary', { text: 'Advanced' });
 
-		if (profile.transcriptionProvider !== 'webspeech') {
+		if (profile.transcriptionProvider !== 'none') {
 			new Setting(details)
 				.setName('Transcription language')
 				.setDesc('Optional language hint. Leave blank to auto-detect.')
@@ -367,18 +408,20 @@ export class ReWriteSettingTab extends PluginSettingTab {
 				});
 		}
 
-		new Setting(details)
-			.setName('LLM max tokens')
-			.setDesc('Maximum tokens for the cleanup response. Default 2048.')
-			.addText((t) => {
-				t.inputEl.type = 'number';
-				t.setValue(String(profile.llmConfig.maxTokens));
-				t.onChange(async (v) => {
-					const n = Number.parseInt(v, 10);
-					profile.llmConfig.maxTokens = Number.isFinite(n) && n > 0 ? n : 2048;
-					await this.commit();
+		if (profile.llmProvider !== 'none') {
+			new Setting(details)
+				.setName('LLM max tokens')
+				.setDesc('Maximum tokens for the cleanup response. Default 2048.')
+				.addText((t) => {
+					t.inputEl.type = 'number';
+					t.setValue(String(profile.llmConfig.maxTokens));
+					t.onChange(async (v) => {
+						const n = Number.parseInt(v, 10);
+						profile.llmConfig.maxTokens = Number.isFinite(n) && n > 0 ? n : 2048;
+						await this.commit();
+					});
 				});
-			});
+		}
 	}
 
 	private renderTranscriptionModelField(parent: HTMLElement, profile: EnvironmentProfile): void {
@@ -690,7 +733,7 @@ export class ReWriteSettingTab extends PluginSettingTab {
 		new Setting(parent).setName('Recording').setHeading();
 		new Setting(parent)
 			.setName('Audio format preference')
-			.setDesc('Web Speech ignores this. Use mp4 on iOS, otherwise webm.')
+			.setDesc('Use mp4 on iOS, otherwise webm.')
 			.addDropdown((dd) => {
 				for (const opt of RECORDING_FORMAT_OPTIONS) dd.addOption(opt.id, opt.label);
 				dd.setValue(this.plugin.settings.recordingFormat);
@@ -862,6 +905,8 @@ function modelFieldDesc(hint: string, supportsList: boolean, cachedCount: number
 
 function transcriptionModelHint(id: TranscriptionProviderID): string {
 	switch (id) {
+		case 'none':
+			return '';
 		case 'openai':
 			return 'e.g. whisper-1';
 		case 'groq':
@@ -878,13 +923,13 @@ function transcriptionModelHint(id: TranscriptionProviderID): string {
 			return 'Whichever model your local server exposes';
 		case 'whisper-local':
 			return 'Any value works; the loaded model is set at server start.';
-		case 'webspeech':
-			return '';
 	}
 }
 
 function llmModelHint(id: LLMProviderID): string {
 	switch (id) {
+		case 'none':
+			return '';
 		case 'anthropic':
 			return 'e.g. claude-sonnet-4-5 or claude-haiku-4-5-20251001';
 		case 'openai':

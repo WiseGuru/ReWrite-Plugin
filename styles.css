@@ -145,6 +145,36 @@
 	margin-bottom: 8px;
 }
 
+.rewrite-settings .rewrite-profile-section {
+	margin-bottom: 16px;
+}
+
+.rewrite-settings .rewrite-profile-section.is-active-profile {
+	border-left: 3px solid var(--interactive-accent);
+	padding-left: 12px;
+	margin-left: -15px;
+}
+
+.rewrite-settings .rewrite-profile-active-badge {
+	display: inline-block;
+	background-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border-radius: 4px;
+	font-size: var(--font-ui-smaller);
+	padding: 1px 6px;
+	margin-left: 8px;
+	vertical-align: middle;
+	font-weight: normal;
+}
+
+.rewrite-settings .rewrite-profile-collapsed > summary {
+	cursor: pointer;
+	user-select: none;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	padding: 4px 0;
+}
+
 /* Quick record floating mini-UI */
 
 .rewrite-quick-floater {

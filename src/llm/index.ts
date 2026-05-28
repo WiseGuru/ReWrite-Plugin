@@ -16,6 +16,11 @@ export interface LLMProvider {
 
 export function createLLMProvider(id: LLMProviderID): LLMProvider {
 	switch (id) {
+		case 'none':
+			return {
+				id: 'none',
+				complete: async (_systemPrompt, userMessage) => userMessage,
+			};
 		case 'anthropic':
 			return createAnthropicLLM();
 		case 'openai':

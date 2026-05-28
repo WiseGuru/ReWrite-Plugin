@@ -5,7 +5,7 @@ import { globalIgnores } from "eslint/config";
 
 // Mirror the plugin's DEFAULT_BRANDS / DEFAULT_ACRONYMS (the rule replaces the
 // defaults when options are passed, so we have to provide the full lists) plus
-// the extras this project needs: provider names, "Web Speech", "ReWrite", "LLM".
+// the extras this project needs: provider names, "ReWrite", "LLM".
 const DEFAULT_BRANDS = [
 	"iOS", "iPadOS", "macOS", "Windows", "Android", "Linux",
 	"Obsidian", "Obsidian Sync", "Obsidian Publish",
@@ -33,7 +33,6 @@ const DEFAULT_ACRONYMS = [
 
 const REWRITE_BRANDS = [
 	"ReWrite",
-	"Web Speech",
 	"OpenAI", "Whisper",
 	"Anthropic", "Claude",
 	"Google Gemini", "Gemini",

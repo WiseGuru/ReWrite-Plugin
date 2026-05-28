@@ -4,7 +4,6 @@ import { createAssemblyAITranscription } from './assemblyai';
 import { createDeepgramTranscription } from './deepgram';
 import { createRevAITranscription } from './revai';
 import { createMistralVoxtralTranscription } from './mistral-voxtral';
-import { createWebSpeechTranscription } from './webspeech';
 import { createWhisperLocalTranscription } from './whisper-local';
 
 export interface TranscriptionProvider {
@@ -22,6 +21,14 @@ export function createTranscriptionProvider(
 	id: TranscriptionProviderID,
 ): TranscriptionProvider {
 	switch (id) {
+		case 'none':
+			return {
+				id: 'none',
+				requiresAudio: false,
+				transcribe: async () => {
+					throw new Error('Transcription is disabled (provider set to None). Use the Paste or From note tab instead.');
+				},
+			};
 		case 'openai':
 		case 'openai-compatible':
 		case 'groq':
@@ -34,8 +41,6 @@ export function createTranscriptionProvider(
 			return createRevAITranscription();
 		case 'mistral-voxtral':
 			return createMistralVoxtralTranscription();
-		case 'webspeech':
-			return createWebSpeechTranscription();
 		case 'whisper-local':
 			return createWhisperLocalTranscription();
 	}

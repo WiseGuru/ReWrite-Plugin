@@ -1,9 +1,8 @@
 import { App, Modal, Notice } from 'obsidian';
 import type ReWritePlugin from '../main';
 import { runPipeline, PipelineSource, PipelineStage } from '../pipeline';
-import { isMediaRecorderAvailable, isWebSpeechAvailable, resolveActiveProfile } from '../platform';
+import { installMobileKeyboardScrollFix, isMediaRecorderAvailable, resolveActiveProfile } from '../platform';
 import { Recorder } from '../recorder';
-import { startWebSpeech, WebSpeechSession } from '../webspeech';
 import { DestinationOverride, EnvironmentProfile, InsertMode, NoteTemplate } from '../types';
 import { isProfileConfigured, isProfileConfiguredForText, renderSetupCard } from './setup-card';
 import { resolveActiveTextSource } from './text-source';
@@ -12,7 +11,6 @@ export class ReWriteModal extends Modal {
 	private templateId: string;
 	private activeTab: 'record' | 'paste' | 'fromNote' = 'record';
 	private recorder: Recorder | null = null;
-	private webSpeech: WebSpeechSession | null = null;
 	private timerHandle: number | null = null;
 	private running = false;
 	private currentSource: PipelineSource | null = null;
@@ -30,6 +28,7 @@ export class ReWriteModal extends Modal {
 
 	onOpen(): void {
 		this.modalEl.addClass('rewrite-modal');
+		installMobileKeyboardScrollFix(this.contentEl);
 		this.render();
 	}
 
@@ -95,7 +94,13 @@ export class ReWriteModal extends Modal {
 		}
 
 		if (this.activeTab === 'record') {
-			this.renderRecordTab(tabBody, profile.transcriptionProvider === 'webspeech', profile.transcriptionConfig.language);
+			if (profile.transcriptionProvider === 'none') {
+				tabBody.createEl('p', {
+					text: 'Recording is disabled because this profile has no transcription provider configured. Switch to one of the other tabs above, or pick a transcription provider in settings.',
+				});
+				return;
+			}
+			this.renderRecordTab(tabBody);
 		} else {
 			this.renderPasteTab(tabBody);
 		}
@@ -271,14 +276,8 @@ export class ReWriteModal extends Modal {
 		});
 	}
 
-	private renderRecordTab(parent: HTMLElement, isWebSpeech: boolean, language: string): void {
-		if (isWebSpeech && !isWebSpeechAvailable()) {
-			parent.createEl('p', {
-				text: 'Web Speech is not available here. Use the paste tab or pick a different transcription provider in settings.',
-			});
-			return;
-		}
-		if (!isWebSpeech && !isMediaRecorderAvailable()) {
+	private renderRecordTab(parent: HTMLElement): void {
+		if (!isMediaRecorderAvailable()) {
 			parent.createEl('p', {
 				text: 'Audio recording is not supported in this environment. Use the paste tab instead.',
 			});
@@ -293,16 +292,13 @@ export class ReWriteModal extends Modal {
 		const dot = indicator.createSpan({ cls: 'rewrite-pulse-dot' });
 		dot.hide();
 		const timer = indicator.createSpan({ cls: 'rewrite-timer', text: '0:00' });
-		const liveTranscript = parent.createDiv({ cls: 'rewrite-live-transcript' });
 
 		let isRecording = false;
 		const handleClick = async (): Promise<void> => {
 			if (this.running) return;
 			if (!isRecording) {
 				try {
-					await this.beginCapture(isWebSpeech, language, (text) => {
-						liveTranscript.setText(text);
-					});
+					await this.beginCapture();
 				} catch (e) {
 					new Notice(e instanceof Error ? e.message : String(e));
 					return;
@@ -310,11 +306,11 @@ export class ReWriteModal extends Modal {
 				isRecording = true;
 				button.setText('Stop');
 				dot.show();
-				this.startTimerLoop(timer, isWebSpeech);
+				this.startTimerLoop(timer);
 			} else {
 				button.disabled = true;
 				try {
-					const source = await this.endCapture(isWebSpeech);
+					const source = await this.endCapture();
 					isRecording = false;
 					button.setText('Record');
 					dot.hide();
@@ -379,38 +375,21 @@ export class ReWriteModal extends Modal {
 		});
 	}
 
-	private async beginCapture(
-		isWebSpeech: boolean,
-		language: string,
-		onLiveText: (text: string) => void,
-	): Promise<void> {
-		if (isWebSpeech) {
-			this.webSpeech = startWebSpeech({
-				language: language || undefined,
-				onUpdate: onLiveText,
-			});
-		} else {
-			this.recorder = new Recorder();
-			await this.recorder.start(this.plugin.settings.recordingFormat);
-		}
+	private async beginCapture(): Promise<void> {
+		this.recorder = new Recorder();
+		await this.recorder.start(this.plugin.settings.recordingFormat);
 	}
 
-	private async endCapture(isWebSpeech: boolean): Promise<PipelineSource> {
-		if (isWebSpeech) {
-			const transcript = (await this.webSpeech?.stop()) ?? '';
-			this.webSpeech = null;
-			return { kind: 'webspeech', transcript };
-		}
+	private async endCapture(): Promise<PipelineSource> {
 		if (!this.recorder) throw new Error('No active recording.');
 		const result = await this.recorder.stop();
 		this.recorder = null;
 		return { kind: 'audio', audio: result.blob, durationMs: result.durationMs };
 	}
 
-	private startTimerLoop(timerEl: HTMLElement, isWebSpeech: boolean): void {
-		const startedAt = Date.now();
+	private startTimerLoop(timerEl: HTMLElement): void {
 		this.timerHandle = window.setInterval(() => {
-			const ms = isWebSpeech ? Date.now() - startedAt : this.recorder?.getElapsedMs() ?? 0;
+			const ms = this.recorder?.getElapsedMs() ?? 0;
 			timerEl.setText(formatDuration(ms));
 		}, 250);
 	}
@@ -426,8 +405,6 @@ export class ReWriteModal extends Modal {
 		this.stopTimerLoop();
 		this.recorder?.cancel();
 		this.recorder = null;
-		this.webSpeech?.cancel();
-		this.webSpeech = null;
 	}
 
 	private async execute(source: PipelineSource): Promise<void> {

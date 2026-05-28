@@ -1,4 +1,5 @@
 import { App, Modal, Notice, Setting } from 'obsidian';
+import { installMobileKeyboardScrollFix } from '../platform';
 
 export interface PassphrasePromptParams {
 	app: App;
@@ -25,6 +26,7 @@ export class PassphraseModal extends Modal {
 		this.modalEl.addClass('rewrite-modal');
 		this.modalEl.addClass('rewrite-passphrase-modal');
 		const { contentEl } = this;
+		installMobileKeyboardScrollFix(contentEl);
 		contentEl.createEl('h2', { text: this.params.title });
 
 		if (this.params.description) {

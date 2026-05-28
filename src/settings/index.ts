@@ -33,7 +33,7 @@ const DESKTOP_DEFAULT_PROFILE: EnvironmentProfile = {
 
 const MOBILE_DEFAULT_PROFILE: EnvironmentProfile = {
 	name: 'Mobile',
-	transcriptionProvider: 'webspeech',
+	transcriptionProvider: 'openai',
 	transcriptionConfig: { ...EMPTY_TRANSCRIPTION_CONFIG },
 	llmProvider: 'anthropic',
 	llmConfig: { ...EMPTY_LLM_CONFIG },

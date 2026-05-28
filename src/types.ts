@@ -1,4 +1,5 @@
 export type TranscriptionProviderID =
+	| 'none'
 	| 'openai'
 	| 'openai-compatible'
 	| 'groq'
@@ -6,10 +7,10 @@ export type TranscriptionProviderID =
 	| 'deepgram'
 	| 'revai'
 	| 'mistral-voxtral'
-	| 'webspeech'
 	| 'whisper-local';
 
 export type LLMProviderID =
+	| 'none'
 	| 'anthropic'
 	| 'openai'
 	| 'openai-compatible'

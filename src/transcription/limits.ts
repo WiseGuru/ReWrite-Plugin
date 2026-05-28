@@ -7,7 +7,7 @@ import { TranscriptionProviderID } from '../types';
 // - Deepgram: 2 GB sync (developers.deepgram.com)
 // - Rev.ai: 2 GB multipart / 17 h (docs.rev.ai/api/asynchronous)
 // - Mistral Voxtral: 1 GB / 30 min (docs.mistral.ai/api/endpoint/audio/transcriptions)
-// - openai-compatible / whisper-local / webspeech: no client-side cap
+// - openai-compatible / whisper-local: no client-side cap
 export interface TranscriptionLimits {
 	readonly maxBytes?: number;
 	readonly maxDurationMs?: number;
@@ -20,6 +20,8 @@ const HOUR = 60 * MIN;
 
 export function getTranscriptionLimits(id: TranscriptionProviderID): TranscriptionLimits {
 	switch (id) {
+		case 'none':
+			return {};
 		case 'openai':
 			return { maxBytes: 25 * MB };
 		case 'groq':
@@ -34,13 +36,13 @@ export function getTranscriptionLimits(id: TranscriptionProviderID): Transcripti
 			return { maxBytes: 1 * GB, maxDurationMs: 30 * MIN };
 		case 'openai-compatible':
 		case 'whisper-local':
-		case 'webspeech':
 			return {};
 	}
 }
 
 export function transcriptionProviderLabel(id: TranscriptionProviderID): string {
 	switch (id) {
+		case 'none': return 'None';
 		case 'openai': return 'OpenAI Whisper';
 		case 'groq': return 'Groq';
 		case 'assemblyai': return 'AssemblyAI';
@@ -49,7 +51,6 @@ export function transcriptionProviderLabel(id: TranscriptionProviderID): string 
 		case 'mistral-voxtral': return 'Mistral Voxtral';
 		case 'openai-compatible': return 'OpenAI-compatible';
 		case 'whisper-local': return 'Local whisper.cpp';
-		case 'webspeech': return 'Web Speech';
 	}
 }
 

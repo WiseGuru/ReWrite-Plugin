@@ -7,7 +7,7 @@ You bring your own provider keys. Nothing is sent to a ReWrite server; the plugi
 ## Features
 
 - Record audio directly in Obsidian, or paste a pre-existing transcript.
-- 7 transcription providers: OpenAI Whisper, OpenAI-compatible (whisper.cpp, faster-whisper-server, etc.), Groq, AssemblyAI, Deepgram, Rev.ai, the browser-native Web Speech API, and a plugin-managed local whisper.cpp server (desktop).
+- 7 transcription providers: OpenAI Whisper, OpenAI-compatible (whisper.cpp, faster-whisper-server, etc.), Groq, AssemblyAI, Deepgram, Rev.ai, Mistral Voxtral, and a plugin-managed local whisper.cpp server (desktop).
 - 5 LLM providers for cleanup: Anthropic Claude, OpenAI GPT, OpenAI-compatible (Ollama, LM Studio), Google Gemini, Mistral.
 - Desktop and Mobile profiles, auto-selected by environment with a manual override.
 - 5 starter templates (General cleanup, Todo list, Daily note, Meeting notes, Idea capture); fully editable and reorderable.
@@ -223,7 +223,6 @@ secrets.json.nosync
 
 Obsidian on iOS and Android runs in a constrained WebView. A few things behave differently from desktop:
 
-- **Web Speech (default mobile transcription provider)** is unavailable on iOS Obsidian (WKWebView does not implement `SpeechRecognition`). On Android, support is patchy. If Web Speech is unavailable, the modal surfaces a notice and you can switch to the Paste tab or pick a different transcription provider on your Mobile profile.
 - **iOS screen-off**: `MediaRecorder` silently stops capturing audio when the screen turns off on iOS. The plugin cannot prevent this; keep the screen on while recording, or use the Paste tab with an OS-level dictation keyboard.
 - **API keys are stored in plaintext on mobile** because Electron's `safeStorage` is not available. The `secrets.json.nosync` file still uses the `.nosync` filename so iCloud Drive will skip it, but for other sync tools you must apply the exclusion rules above.
 - **Recording size limit**: clips over 25 MB are rejected. This is a transcription-API limit, not an Obsidian one, and is most likely to bite on long mobile recordings.

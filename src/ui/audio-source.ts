@@ -35,6 +35,10 @@ export async function runAudioFilePipeline(
 		plugin.promptUnlock();
 		return;
 	}
+	if (profile.transcriptionProvider === 'none') {
+		new Notice('ReWrite: transcription is disabled for this profile. Pick a transcription provider in settings to reprocess audio.');
+		return;
+	}
 	if (!isProfileConfigured(profile)) {
 		new Notice('ReWrite: configure a transcription and LLM provider before reprocessing audio.');
 		new ReWriteModal(plugin.app, plugin).open();
