@@ -52,7 +52,7 @@ src/
 ├── pipeline.ts                      # transcribe → cleanup → insert orchestrator
 ├── insert.ts                        # cursor/newFile/append + {{date}}/{{time}} expansion
 ├── whisper-host.ts                  # Spawns/stops a user-supplied whisper-server child process (desktop only)
-├── templates-folder.ts              # Load templates from a vault folder + populate it with the 5 defaults
+├── templates-folder.ts              # Load templates from a vault folder + populate it with the 7 defaults
 ├── assistant-prompt.ts              # Load the ad-hoc-instructions assistant prompt from a vault Markdown file + populate default
 ├── known-nouns.ts                   # Load a vault Markdown file of known nouns + populate default + build the system-prompt section
 ├── audio-persist.ts                 # Write the recorded Blob to an attachments folder, return vault-relative path
@@ -60,7 +60,7 @@ src/
 ├── settings/
 │   ├── index.ts                     # DEFAULT_SETTINGS, load/save, per-profile secret hydration
 │   ├── tab.ts                       # PluginSettingTab: active profile, two profile sections, templates folder, recording
-│   └── default-templates.ts         # The 5 default templates used by the populate button (General cleanup, Todo list, etc.)
+│   └── default-templates.ts         # The 7 default templates used by the populate button (General cleanup, Todo list, Daily note, Meeting notes, Idea capture, Lecture, Podcast); each prompt = a shared SHARED_CORE block + per-template rules
 ├── ui/
 │   ├── modal.ts                     # Main modal: template select + Record/Paste/From note tabs + setup-card injection
 │   ├── setup-card.ts                # Inline blocker when active profile is unconfigured (voice vs text purpose)
@@ -166,6 +166,8 @@ Templates are Markdown files in a vault folder, not entries in `data.json`. The 
 - the populate button completing
 
 Consumers ([src/main.ts](src/main.ts), [src/ui/modal.ts](src/ui/modal.ts), [src/ui/quick-record.ts](src/ui/quick-record.ts)) read `plugin.templates` directly, never `settings.templates` (there is no such field). The populate button is non-destructive: it skips any default template whose `id` already exists on disk, and skips path collisions. Frontmatter `id` is canonical for identity, so renaming a file does not break the `defaultTemplateId` / `lastUsedTemplateId` reference. The first-launch experience is empty templates plus a setup nudge in the modal; the user clicks Populate to get the defaults.
+
+The 7 defaults ([src/settings/default-templates.ts](src/settings/default-templates.ts)) are General cleanup, Todo list, Daily note, Meeting notes, Idea capture, Lecture, Podcast. Every default prompt is composed as `${SHARED_CORE}\n\n${perTemplateRules}` via the `withCore()` helper: `SHARED_CORE` is a single source-level constant (anti-injection guardrail + condensed cleanup + output discipline) so the rule baseline stays DRY, but each generated `.md` file is fully standalone and independently editable (there is no include mechanism; the composed string is what lands on disk). General cleanup carries the full detailed prose-polishing ruleset as its per-template section; the structured templates carry only their section layout. The Daily note default is a prompt-only structured fill (`## Braindump` = the full cleaned transcript, then extracted `## Goals` / `## Tasks` / `## Calendar`, each omitted when empty); no `NoteTemplate` schema change was needed to drive it.
 
 ## Assistant prompt
 

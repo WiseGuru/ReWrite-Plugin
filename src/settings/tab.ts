@@ -670,7 +670,7 @@ export class ReWriteSettingTab extends PluginSettingTab {
 
 		new Setting(parent)
 			.setName('Populate with default templates')
-			.setDesc('Writes the five built-in templates into the folder above. Skips any whose ID already exists, so re-running tops up after a deletion.')
+			.setDesc('Writes the seven built-in templates into the folder above. Skips any whose ID already exists, so re-running tops up after a deletion.')
 			.addButton((b) => {
 				b.setButtonText('Populate').setCta().onClick(async () => {
 					try {
