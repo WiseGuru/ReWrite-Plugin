@@ -7,12 +7,19 @@ You bring your own provider keys. Nothing is sent to a ReWrite server; the plugi
 ## Features
 
 - Record audio directly in Obsidian, or paste a pre-existing transcript.
-- 7 transcription providers: OpenAI Whisper, OpenAI-compatible (whisper.cpp, faster-whisper-server, etc.), Groq, AssemblyAI, Deepgram, Rev.ai, Mistral Voxtral, and a plugin-managed local whisper.cpp server (desktop).
+- 8 transcription providers: OpenAI Whisper, OpenAI-compatible (whisper.cpp, faster-whisper-server, etc.), Groq, AssemblyAI, Deepgram, Rev.ai, Mistral Voxtral, and a plugin-managed local whisper.cpp server (desktop).
 - 5 LLM providers for cleanup: Anthropic Claude, OpenAI GPT, OpenAI-compatible (Ollama, LM Studio), Google Gemini, Mistral.
 - Desktop and Mobile profiles, auto-selected by environment with a manual override.
-- 5 starter templates (General cleanup, Todo list, Daily note, Meeting notes, Idea capture); fully editable and reorderable.
+- 5 starter templates (General cleanup, Todo list, Daily note, Meeting notes, Idea capture), stored as editable Markdown files in your vault and ordered by filename (prefix with `01-`, `02-`, etc. to reorder).
 - Quick Record command for one-shot capture with no modal: ribbon icon, command palette, or a custom hotkey.
-- Three insert modes: at the cursor, append to the active note, or create a new note with `{{date}}` / `{{time}}` filename templating.
+- Three insert modes: at the cursor, append to the active note, or create a new note with `{{date}}` / `{{time}}` filename templating. The modal's per-run Destination control overrides the template's mode, folder, and filename for a single run without editing the template.
+- **Process text with a template**: run any template over the current selection or whole note body, no audio needed, from the command palette or the editor right-click menu.
+- **Reprocess audio**: rerun the pipeline over an audio file already in your vault, from the command palette, the file-explorer right-click menu, or by placing the cursor inside an `![[audio]]` embed. Useful for retrying with a different template or provider.
+- **Saved recordings**: each recording is written to your attachments folder and linked back into the output with an `![[...]]` embed, so the original audio stays in your vault.
+- **Ad-hoc voice instructions**: speak your assistant's name followed by an instruction mid-recording (e.g. "Scrivener, turn this into a checklist") and the directive is extracted and added to the cleanup prompt for that run only. The trigger word is configurable.
+- **Assistant prompt**: a vault Markdown file defines the persona and standing instructions prefaced to the cleanup step, so you can shape tone and behavior without touching settings.
+- **Known nouns**: a vault Markdown file of proper nouns (with optional misheard variants) that the LLM preserves verbatim, fixing names the transcriber tends to mangle.
+- **API key encryption**: keys are stored per device in OS keychain (desktop), passphrase-based AES-GCM (cross-platform), or plaintext.
 
 ## Install
 
@@ -145,9 +152,13 @@ If transcription quality drops noticeably (truncated sentences, missing trailing
 
 API keys are stored in `<YourVault>/.obsidian/plugins/rewrite-plugin/secrets.json.nosync`, separately from the rest of the plugin's settings.
 
-On desktop, the file contains keys encrypted with Electron's `safeStorage` API, which is tied to the user account on that specific machine. The encrypted blob cannot be decrypted on another desktop, on mobile, or in a fresh OS profile. On mobile, keys are stored in plaintext because `safeStorage` is not available.
+The plugin supports three at-rest encryption modes for this file, selectable in settings under "API key encryption":
 
-For both of those reasons, **you should exclude `secrets.json.nosync` from any vault sync mechanism** and enter keys once per device. Configure the exclusion **before the first sync**, since files already uploaded usually remain on the remote.
+- **OS keychain** (`safeStorage`): the default on desktop. Keys are encrypted with Electron's `safeStorage` API, which is tied to the user account on that specific machine. The encrypted blob cannot be decrypted on another desktop, on mobile, or in a fresh OS profile.
+- **Passphrase**: AES-GCM encryption with a key derived from a passphrase you set. Works on every platform including mobile, and the blob is portable across devices (you re-enter the passphrase to unlock on each one).
+- **Plaintext**: no encryption. This is the zero-config default on mobile and other devices without an OS keychain. Switch to passphrase encryption if you want the keys protected at rest.
+
+Unless you are using passphrase mode, **you should exclude `secrets.json.nosync` from any vault sync mechanism** and enter keys once per device. Configure the exclusion **before the first sync**, since files already uploaded usually remain on the remote.
 
 The path to exclude is always:
 
@@ -224,16 +235,15 @@ secrets.json.nosync
 Obsidian on iOS and Android runs in a constrained WebView. A few things behave differently from desktop:
 
 - **iOS screen-off**: `MediaRecorder` silently stops capturing audio when the screen turns off on iOS. The plugin cannot prevent this; keep the screen on while recording, or use the Paste tab with an OS-level dictation keyboard.
-- **API keys are stored in plaintext on mobile** because Electron's `safeStorage` is not available. The `secrets.json.nosync` file still uses the `.nosync` filename so iCloud Drive will skip it, but for other sync tools you must apply the exclusion rules above.
-- **Recording size limit**: clips over 25 MB are rejected. This is a transcription-API limit, not an Obsidian one, and is most likely to bite on long mobile recordings.
+- **API keys default to plaintext on mobile** because Electron's `safeStorage` is not available there. You can switch to passphrase encryption in settings (API key encryption) to protect them at rest. The `secrets.json.nosync` file uses the `.nosync` filename so iCloud Drive will skip it; for other sync tools, apply the exclusion rules above (or use passphrase mode if you intend to sync the file).
+- **Recording size limit**: each transcription provider enforces its own ceiling (OpenAI Whisper and Groq are the tightest at 25 MB; AssemblyAI, Deepgram, and Rev.ai allow gigabytes). These are provider-API limits, not Obsidian ones, and are most likely to bite on long mobile recordings with the 25 MB providers.
 
 ## Known limitations (v1)
 
 - No audio playback or waveform display.
-- Raw audio is not saved to the vault, only the cleaned transcript.
 - LLM responses are not streamed; you see the cleaned output once the whole response arrives.
 - No speaker diarization.
-- No long-audio chunking; clips over 25 MB error out instead of being split.
+- No long-audio chunking; clips that exceed the active provider's size or duration limit error out instead of being split.
 - The OpenAI-compatible transcription endpoint expects a server that mirrors Whisper's `/v1/audio/transcriptions` shape (whisper.cpp, faster-whisper-server). The OpenAI-compatible LLM endpoint expects a `/chat/completions` shape (Ollama, LM Studio, etc.).
 - Anthropic Claude calls go through Obsidian's `requestUrl`, which bypasses browser CORS. If you reuse the same endpoint from another tool that uses `fetch`, you will need their browser-direct-access header.
 
