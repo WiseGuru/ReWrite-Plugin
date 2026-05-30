@@ -1,4 +1,4 @@
-import { App, Notice, Platform, PluginSettingTab, Setting } from 'obsidian';
+import { App, Notice, Platform, PluginSettingTab, Setting, setIcon } from 'obsidian';
 import type ReWritePlugin from '../main';
 import {
 	ActiveProfileKind,
@@ -83,6 +83,16 @@ export class ReWriteSettingTab extends PluginSettingTab {
 		await this.plugin.saveSettings();
 	}
 
+	// Builds a section heading with a Lucide icon prepended to its label. Returns the
+	// Setting so callers can still reach nameEl (e.g. to attach a status badge).
+	private sectionHeading(parent: HTMLElement, name: string, icon: string): Setting {
+		const setting = new Setting(parent).setName(name).setHeading();
+		const iconEl = setting.nameEl.createSpan({ cls: 'rewrite-heading-icon' });
+		setIcon(iconEl, icon);
+		setting.nameEl.prepend(iconEl);
+		return setting;
+	}
+
 	private apiKeyPlaceholder(): string {
 		const status = this.plugin.encryptionStatus;
 		if (status.locked) {
@@ -139,10 +149,10 @@ export class ReWriteSettingTab extends PluginSettingTab {
 			});
 		}
 
-		new Setting(parent).setName('API key encryption').setHeading();
+		this.sectionHeading(parent, 'API key encryption', 'lock');
 
 		parent.createEl('p', {
-			text: 'Choose how your API keys are protected on disk. Keys are stored in secrets.json.nosync in the plugin folder; this setting controls how they are encrypted.',
+			text: 'Your API keys are saved in a file named secrets.json.nosync in the plugin folder. This setting picks how that file is locked.',
 			cls: 'rewrite-section-desc',
 		});
 
@@ -242,7 +252,7 @@ export class ReWriteSettingTab extends PluginSettingTab {
 	}
 
 	private renderActiveProfile(parent: HTMLElement): void {
-		new Setting(parent).setName('Active profile').setHeading();
+		this.sectionHeading(parent, 'Active profile', 'user');
 		const s = this.plugin.settings;
 		const detected = detectActiveProfileKind(s);
 		const detectedLabel = detected === 'desktop' ? 'Desktop' : 'Mobile';
@@ -276,7 +286,7 @@ export class ReWriteSettingTab extends PluginSettingTab {
 		const section = parent.createDiv({ cls: 'rewrite-profile-section' });
 		if (isActive) section.addClass('is-active-profile');
 
-		const heading = new Setting(section).setName(title).setHeading();
+		const heading = this.sectionHeading(section, title, kind === 'desktop' ? 'monitor' : 'smartphone');
 		if (isActive) {
 			heading.nameEl.createSpan({
 				cls: 'rewrite-profile-active-badge',
@@ -578,9 +588,9 @@ export class ReWriteSettingTab extends PluginSettingTab {
 	private renderLocalWhisperServer(parent: HTMLElement): void {
 		if (!Platform.isDesktop) return;
 
-		new Setting(parent).setName('Local whisper.cpp server (desktop)').setHeading();
+		this.sectionHeading(parent, 'Local whisper.cpp server (desktop)', 'server');
 		parent.createEl('p', {
-			text: 'Spawn a user-supplied whisper-server binary so transcription happens fully on-device. The plugin only reads the paths you provide; it never downloads or discovers binaries.',
+			text: 'Run your own whisper-server program so your speech stays on this computer. The plugin only uses the file paths you give it. It never downloads or looks for programs on its own.',
 			cls: 'rewrite-section-desc',
 		});
 
@@ -682,9 +692,9 @@ export class ReWriteSettingTab extends PluginSettingTab {
 	}
 
 	private renderTemplates(parent: HTMLElement): void {
-		new Setting(parent).setName('Templates').setHeading();
+		this.sectionHeading(parent, 'Templates', 'layout-template');
 		parent.createEl('p', {
-			text: 'Templates live as Markdown files in a vault folder. The file body is the LLM prompt; frontmatter holds the metadata. Files are sorted by filename, so prefix with a number to control order.',
+			text: 'Each template is a Markdown file in a vault folder. The text in the file is the prompt. The frontmatter holds its settings. Files show up in name order, so put a number in front of a name to set the order.',
 			cls: 'rewrite-section-desc',
 		});
 
@@ -704,7 +714,7 @@ export class ReWriteSettingTab extends PluginSettingTab {
 
 		new Setting(parent)
 			.setName('Populate with default templates')
-			.setDesc('Writes the seven built-in templates into the folder above, and the shared core file if it is missing. Skips any whose ID already exists, so re-running tops up after a deletion.')
+			.setDesc('Writes the seven built-in templates into the folder above, plus the shared core file if it is missing. It skips any template that already exists, so you can run it again to top up after deleting one.')
 			.addButton((b) => {
 				b.setButtonText('Populate').setCta().onClick(async () => {
 					try {
@@ -762,7 +772,7 @@ export class ReWriteSettingTab extends PluginSettingTab {
 	}
 
 	private renderRecording(parent: HTMLElement): void {
-		new Setting(parent).setName('Recording').setHeading();
+		this.sectionHeading(parent, 'Recording', 'mic');
 		new Setting(parent)
 			.setName('Audio format preference')
 			.setDesc('Use mp4 on iOS, otherwise webm.')
@@ -777,7 +787,7 @@ export class ReWriteSettingTab extends PluginSettingTab {
 
 		new Setting(parent)
 			.setName('Attachments folder')
-			.setDesc('Vault-relative folder for saved recordings. Leave empty to use the vault\'s attachments setting. Each recording is embedded at the top of the cleaned output.')
+			.setDesc('Folder in your vault for saved recordings. Leave it empty to use your vault\'s own attachments setting. Each recording is linked at the top of the cleaned note.')
 			.addText((t) => {
 				t.setValue(this.plugin.settings.attachmentsFolderPath);
 				t.setPlaceholder('Attachments');
@@ -789,15 +799,15 @@ export class ReWriteSettingTab extends PluginSettingTab {
 	}
 
 	private renderAdHocInstructions(parent: HTMLElement): void {
-		new Setting(parent).setName('Ad-hoc instructions').setHeading();
+		this.sectionHeading(parent, 'Ad-hoc instructions', 'message-square');
 		parent.createEl('p', {
-			text: 'Address the assistant by name mid-dictation, then a comma, then a directive. Matches are stripped from the transcript and appended to the cleanup prompt as numbered instructions. Off by default. Pick an uncommon word; common everyday words will misfire.',
+			text: 'Say the assistant\'s name while you talk, then a comma, then what you want it to do. The plugin takes that part out of your words and passes it to the cleanup step as a note. This is off by default. Pick an unusual name. Common everyday words will set it off by mistake.',
 			cls: 'rewrite-section-desc',
 		});
 
 		new Setting(parent)
 			.setName('Enabled')
-			.setDesc('Scan transcripts (all sources) for the assistant name and extract impromptu instructions.')
+			.setDesc('Look through your text for the assistant name and pull out any instructions you spoke.')
 			.addToggle((t) => {
 				t.setValue(this.plugin.settings.adHocInstructionsEnabled);
 				t.onChange(async (v) => {
@@ -810,7 +820,7 @@ export class ReWriteSettingTab extends PluginSettingTab {
 		if (this.plugin.settings.adHocInstructionsEnabled) {
 			new Setting(parent)
 				.setName('Assistant name')
-				.setDesc('The wake word the assistant listens for. Speech recognition may mangle uncommon names; expect occasional misses.')
+				.setDesc('The name the assistant listens for. Speech to text can get unusual names wrong, so expect a miss now and then.')
 				.addText((t) => {
 					t.setValue(this.plugin.settings.assistantName);
 					t.setPlaceholder('Scrivener');
@@ -822,7 +832,7 @@ export class ReWriteSettingTab extends PluginSettingTab {
 
 			new Setting(parent)
 				.setName('Assistant prompt file')
-				.setDesc('Vault-relative path to a Markdown file whose body is inserted above the numbered list of interjections in the system prompt. Edit it like a normal note to tell the LLM how to weight and apply ad-hoc directives.')
+				.setDesc('Path in your vault to a Markdown file. Its text goes above the list of your spoken instructions in the prompt. Edit it like any note to tell the model how to use those instructions.')
 				.addText((t) => {
 					t.setValue(this.plugin.settings.assistantPromptPath);
 					t.setPlaceholder('ReWrite/AssistantPrompt.md');
@@ -872,20 +882,20 @@ export class ReWriteSettingTab extends PluginSettingTab {
 	}
 
 	private renderSharedCore(parent: HTMLElement): void {
-		const heading = new Setting(parent).setName('Shared core').setHeading();
+		const heading = this.sectionHeading(parent, 'Shared core', 'layers');
 		const enabled = this.plugin.sharedCore !== null;
 		heading.nameEl.createSpan({
 			cls: `rewrite-status-badge ${enabled ? 'is-enabled' : 'is-disabled'}`,
 			text: enabled ? 'Enabled' : 'Disabled',
 		});
 		parent.createEl('p', {
-			text: 'A vault file whose text is prepended to every template prompt: the anti-injection guardrail, baseline cleanup rules, and output discipline. Edit it once to change the baseline for all templates. It is sent on every cleanup call, so trim it if you want to save tokens. To skip it for one specific template, add "disableSharedCore: true" to that template\'s frontmatter. Deleting or emptying this file disables the shared core for the whole plugin.',
+			text: 'One vault file that is added to the front of every template prompt. It holds the safety rule, the basic cleanup rules, and the output rules. Edit it once to change the baseline for all templates. It is sent on every cleanup, so keep it short to save tokens. To skip it for one template, add "disableSharedCore: true" to that template\'s frontmatter. If you delete or empty this file, the shared core is turned off for the whole plugin.',
 			cls: 'rewrite-section-desc',
 		});
 
 		new Setting(parent)
 			.setName('Shared core file')
-			.setDesc('Vault-relative path. The file body is the shared preface; any frontmatter is guidance only and is not sent to the LLM.')
+			.setDesc('Path in your vault. The file body is the shared text. Any frontmatter is just notes for you and is not sent to the model.')
 			.addText((t) => {
 				t.setValue(this.plugin.settings.sharedCorePath);
 				t.setPlaceholder('ReWrite/SharedCore.md');
@@ -934,15 +944,15 @@ export class ReWriteSettingTab extends PluginSettingTab {
 	}
 
 	private renderKnownNouns(parent: HTMLElement): void {
-		new Setting(parent).setName('Known nouns').setHeading();
+		this.sectionHeading(parent, 'Known nouns', 'book-open');
 		parent.createEl('p', {
-			text: 'A vault file listing proper nouns the LLM should preserve verbatim, with optional misheard alternates. The list is appended to every cleanup system prompt, so keep it focused on nouns the LLM actually mangles; an unbounded list inflates token cost on every recording.',
+			text: 'A vault file that lists names the model should keep exactly as written, plus any common mishearings. The list is added to every cleanup prompt. Keep it short, with only the names the model gets wrong. A long list raises the token cost of every recording.',
 			cls: 'rewrite-section-desc',
 		});
 
 		new Setting(parent)
 			.setName('Known nouns file')
-			.setDesc('Vault-relative path. Frontmatter is for human-readable guidance only; the body is one noun per line, with an optional ": alt1, alt2" suffix for misheard variants.')
+			.setDesc('Path in your vault. Frontmatter is just notes for you. In the body, put one name per line. You can add ": alt1, alt2" after a name to list common mishearings.')
 			.addText((t) => {
 				t.setValue(this.plugin.settings.knownNounsPath);
 				t.setPlaceholder('ReWrite/KnownNouns.md');

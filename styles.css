@@ -138,6 +138,19 @@
 
 /* Settings tab */
 
+.rewrite-settings .rewrite-heading-icon {
+	display: inline-flex;
+	align-items: center;
+	vertical-align: middle;
+	margin-right: 8px;
+	color: var(--text-accent);
+}
+
+.rewrite-settings .rewrite-heading-icon svg {
+	width: var(--icon-s, 16px);
+	height: var(--icon-s, 16px);
+}
+
 .rewrite-settings .rewrite-section-desc {
 	color: var(--text-muted);
 	font-size: var(--font-ui-small);
