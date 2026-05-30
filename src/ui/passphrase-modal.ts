@@ -1,4 +1,8 @@
 import { App, Modal, Notice, Platform, Setting } from 'obsidian';
+import { evaluatePassphrase, MIN_PASSPHRASE_SCORE, warmPassphraseStrength } from 'passphrase-strength';
+import { generateDicewarePassphrase } from 'diceware';
+
+const STRENGTH_LABELS = ['Very weak', 'Weak', 'Fair', 'Strong', 'Very strong'];
 
 export interface PassphrasePromptParams {
 	app: App;
@@ -7,6 +11,9 @@ export interface PassphrasePromptParams {
 	confirmLabel?: string;
 	// When true, render a second "Confirm passphrase" field that must match.
 	requireConfirm?: boolean;
+	// When true (create/change flows), render the strength meter + Generate button and
+	// block submit below MIN_PASSPHRASE_SCORE. Leave false for the unlock flow.
+	enforceStrength?: boolean;
 	// Called with the entered passphrase. Throw to keep the modal open and surface an error.
 	onSubmit: (passphrase: string) => Promise<void>;
 }
@@ -17,6 +24,12 @@ export class PassphraseModal extends Modal {
 	private busy = false;
 	private errorEl: HTMLElement | null = null;
 	private tipsEl: HTMLDetailsElement | null = null;
+	private passInput: HTMLInputElement | null = null;
+	private confirmInput: HTMLInputElement | null = null;
+	private strengthBarEl: HTMLElement | null = null;
+	private strengthTextEl: HTMLElement | null = null;
+	private strengthTimer: number | null = null;
+	private strengthSeq = 0;
 
 	constructor(private readonly params: PassphrasePromptParams) {
 		super(params.app);
@@ -36,7 +49,7 @@ export class PassphraseModal extends Modal {
 			this.renderPassphraseTips(contentEl);
 		}
 
-		new Setting(contentEl)
+		const passSetting = new Setting(contentEl)
 			.setName('Passphrase')
 			.addText((t) => {
 				t.inputEl.type = 'password';
@@ -44,10 +57,27 @@ export class PassphraseModal extends Modal {
 				// On mobile, programmatic autofocus would fire `focus` (collapsing
 				// the tips) before the user has read them; let the user's tap do it.
 				t.inputEl.autofocus = !Platform.isMobile;
-				t.onChange((v) => { this.passphrase = v; });
+				this.passInput = t.inputEl;
+				t.onChange((v) => {
+					this.passphrase = v;
+					this.scheduleStrengthUpdate();
+				});
 				t.inputEl.addEventListener('focus', () => this.collapseTipsOnMobile());
 				t.inputEl.addEventListener('keydown', (e) => this.onKeydown(e));
 			});
+
+		if (this.params.enforceStrength) {
+			// Begin loading the estimator now (while the user reads the tips / picks a
+			// field) so the first keystroke does not pay the dictionary-build cost.
+			warmPassphraseStrength();
+			passSetting.addButton((b) => {
+				b.setButtonText('Generate')
+					.setTooltip('Generate a 6-word passphrase')
+					.onClick(() => this.fillGenerated());
+				b.buttonEl.addClass('rewrite-passphrase-generate');
+			});
+			this.renderStrengthMeter(contentEl);
+		}
 
 		if (this.params.requireConfirm) {
 			new Setting(contentEl)
@@ -55,6 +85,7 @@ export class PassphraseModal extends Modal {
 				.addText((t) => {
 					t.inputEl.type = 'password';
 					t.inputEl.addClass('rewrite-passphrase-input');
+					this.confirmInput = t.inputEl;
 					t.onChange((v) => { this.confirm = v; });
 					t.inputEl.addEventListener('focus', () => this.collapseTipsOnMobile());
 					t.inputEl.addEventListener('keydown', (e) => this.onKeydown(e));
@@ -76,6 +107,15 @@ export class PassphraseModal extends Modal {
 	}
 
 	onClose(): void {
+		if (this.strengthTimer !== null) {
+			window.clearTimeout(this.strengthTimer);
+			this.strengthTimer = null;
+		}
+		// Invalidate any in-flight strength evaluation and drop DOM refs so a late
+		// async result does not write to detached nodes.
+		this.strengthSeq++;
+		this.strengthBarEl = null;
+		this.strengthTextEl = null;
 		this.passphrase = '';
 		this.confirm = '';
 		this.contentEl.empty();
@@ -94,9 +134,7 @@ export class PassphraseModal extends Modal {
 		const list = tips.createEl('ul');
 
 		const li1 = list.createEl('li');
-		li1.createSpan({ text: 'Length beats complexity. A 5-6 word diceware-style password (like one you can generate ' });
-		appendExternalLink(li1, 'here', 'https://www.keepersecurity.com/features/passphrase-generator/');
-		li1.createSpan({ text: ') is far stronger than ' });
+		li1.createSpan({ text: 'Length beats complexity. The Generate button makes a 6-word diceware passphrase, far stronger than ' });
 		li1.createEl('code', { text: 'P@ssw0rd!' });
 		li1.createSpan({ text: ' and much easier to remember than ' });
 		// eslint-disable-next-line obsidianmd/ui/sentence-case
@@ -113,6 +151,76 @@ export class PassphraseModal extends Modal {
 		li3.createSpan({ text: ' before using them. See ' });
 		appendExternalLink(li3, 'hivesystems.com/password', 'https://www.hivesystems.com/password');
 		li3.createSpan({ text: ' for brute-force time estimates by length and character class.' });
+	}
+
+	private renderStrengthMeter(parent: HTMLElement): void {
+		const wrap = parent.createDiv({ cls: 'rewrite-passphrase-strength' });
+		this.strengthBarEl = wrap.createDiv({ cls: 'rewrite-passphrase-strength-bar' });
+		for (let i = 0; i < 4; i++) {
+			this.strengthBarEl.createDiv({ cls: 'rewrite-passphrase-strength-seg' });
+		}
+		this.strengthTextEl = wrap.createDiv({ cls: 'rewrite-passphrase-strength-text' });
+		void this.updateStrength();
+	}
+
+	private scheduleStrengthUpdate(): void {
+		if (!this.params.enforceStrength) return;
+		if (this.strengthTimer !== null) window.clearTimeout(this.strengthTimer);
+		this.strengthTimer = window.setTimeout(() => {
+			this.strengthTimer = null;
+			void this.updateStrength();
+		}, 150);
+	}
+
+	private async updateStrength(): Promise<void> {
+		if (!this.strengthBarEl || !this.strengthTextEl) return;
+		// Guard against out-of-order async results: only the most recent call wins.
+		const seq = ++this.strengthSeq;
+		const pass = this.passphrase;
+		const empty = pass.length === 0;
+		const { score, warning, suggestions } = empty
+			? { score: 0, warning: '', suggestions: [] as string[] }
+			: await evaluatePassphrase(pass);
+		// A newer keystroke (or modal close) superseded this evaluation; drop it.
+		if (seq !== this.strengthSeq || !this.strengthBarEl || !this.strengthTextEl) return;
+		const level = score <= 1 ? 'is-weak' : score === 2 ? 'is-fair' : score === 3 ? 'is-good' : 'is-strong';
+		const filled = empty ? 0 : Math.max(score, 1);
+		const segs = Array.from(this.strengthBarEl.children) as HTMLElement[];
+		segs.forEach((seg, i) => {
+			seg.removeClass('is-weak', 'is-fair', 'is-good', 'is-strong', 'is-filled');
+			if (i < filled) {
+				seg.addClass('is-filled');
+				seg.addClass(level);
+			}
+		});
+
+		let msg = '';
+		if (!empty) {
+			msg = STRENGTH_LABELS[score] ?? '';
+			if (score < MIN_PASSPHRASE_SCORE) {
+				const hint = warning || suggestions[0] || 'Add more words or make it more unique.';
+				msg = `${msg}: ${hint}`;
+			}
+		}
+		this.strengthTextEl.setText(msg);
+		this.strengthTextEl.toggleClass('is-acceptable', !empty && score >= MIN_PASSPHRASE_SCORE);
+	}
+
+	private fillGenerated(): void {
+		const phrase = generateDicewarePassphrase(6);
+		this.passphrase = phrase;
+		this.confirm = phrase;
+		// Reveal so the user can read/copy what was generated.
+		if (this.passInput) {
+			this.passInput.value = phrase;
+			this.passInput.type = 'text';
+		}
+		if (this.confirmInput) {
+			this.confirmInput.value = phrase;
+			this.confirmInput.type = 'text';
+		}
+		void this.updateStrength();
+		this.clearError();
 	}
 
 	private collapseTipsOnMobile(): void {
@@ -148,6 +256,10 @@ export class PassphraseModal extends Modal {
 		}
 		if (this.params.requireConfirm && this.passphrase !== this.confirm) {
 			this.setError('Passphrases do not match.');
+			return;
+		}
+		if (this.params.enforceStrength && (await evaluatePassphrase(this.passphrase)).score < MIN_PASSPHRASE_SCORE) {
+			this.setError('Passphrase is too weak. Add more words or use Generate.');
 			return;
 		}
 		this.busy = true;

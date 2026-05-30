@@ -84,7 +84,10 @@ export class ReWriteSettingTab extends PluginSettingTab {
 	}
 
 	private apiKeyPlaceholder(): string {
-		if (this.plugin.encryptionStatus.locked) return 'Locked. Unlock to view or edit.';
+		const status = this.plugin.encryptionStatus;
+		if (status.locked) {
+			return status.configured ? 'Locked. Unlock to view or edit.' : 'Set a passphrase to store keys.';
+		}
 		return 'Saved securely on this device';
 	}
 
@@ -98,7 +101,17 @@ export class ReWriteSettingTab extends PluginSettingTab {
 		const status = this.plugin.encryptionStatus;
 
 		const banner = parent.createDiv({ cls: 'rewrite-encryption-banner' });
-		if (status.locked) {
+		if (status.mode === 'passphrase' && !status.configured) {
+			banner.addClass('is-warning');
+			banner.createEl('strong', { text: 'No encryption set.' });
+			banner.createEl('span', {
+				text: ' Set a passphrase to encrypt your API keys on this device. Until then, recording and processing are disabled.',
+			});
+			const setBtn = banner.createEl('button', { text: 'Set passphrase', cls: 'mod-cta' });
+			setBtn.addEventListener('click', () => {
+				this.plugin.promptUnlock(() => this.display());
+			});
+		} else if (status.locked) {
 			banner.addClass('is-locked');
 			banner.createEl('strong', { text: 'API keys are locked.' });
 			banner.createEl('span', {
@@ -108,12 +121,6 @@ export class ReWriteSettingTab extends PluginSettingTab {
 			unlockBtn.addEventListener('click', () => {
 				this.plugin.promptUnlock(() => this.display());
 			});
-		} else if (status.mode === 'plaintext') {
-			banner.addClass('is-warning');
-			banner.createEl('strong', { text: 'Plaintext storage.' });
-			banner.createEl('span', {
-				text: ' Your API keys are stored unencrypted on this device. Any process running as your user account can read them. Switch to a passphrase below to encrypt them.',
-			});
 		} else if (status.mode === 'safeStorage') {
 			banner.addClass('is-ok');
 			const backend = status.safeStorageBackend ? ` (${status.safeStorageBackend})` : '';
@@ -121,6 +128,15 @@ export class ReWriteSettingTab extends PluginSettingTab {
 		} else if (status.mode === 'passphrase') {
 			banner.addClass('is-ok');
 			banner.createEl('span', { text: 'Encrypted with passphrase. Unlocked for this session.' });
+		}
+
+		if (status.safeStorageInsecure) {
+			const backend = status.safeStorageBackend ? ` (reported "${status.safeStorageBackend}")` : '';
+			const note = parent.createDiv({ cls: 'rewrite-encryption-banner is-warning' });
+			note.createEl('strong', { text: 'OS keychain unavailable.' });
+			note.createEl('span', {
+				text: ` Your operating system's secret store${backend} does not actually encrypt, so it is not offered here. Use a passphrase instead.`,
+			});
 		}
 
 		new Setting(parent).setName('API key encryption').setHeading();
@@ -136,7 +152,6 @@ export class ReWriteSettingTab extends PluginSettingTab {
 			.addDropdown((dd) => {
 				if (status.safeStorageAvailable) dd.addOption('safeStorage', 'OS keychain (recommended)');
 				dd.addOption('passphrase', 'Passphrase (cross-platform)');
-				dd.addOption('plaintext', 'Plaintext (not recommended)');
 				dd.setValue(status.mode);
 				dd.onChange((v) => {
 					const next = v as EncryptionMode;
@@ -157,6 +172,7 @@ export class ReWriteSettingTab extends PluginSettingTab {
 							description: 'Replaces the current passphrase. Stored API keys will be re-encrypted.',
 							confirmLabel: 'Save',
 							requireConfirm: true,
+							enforceStrength: true,
 							onSubmit: async (pass) => {
 								await changeEncryptionMode(this.plugin, 'passphrase', pass);
 								await this.plugin.refreshEncryptionStatus();
@@ -184,12 +200,11 @@ export class ReWriteSettingTab extends PluginSettingTab {
 	private encryptionModeDescription(status: { mode: EncryptionMode; safeStorageAvailable: boolean; safeStorageBackend: string | null }): string {
 		const lines: string[] = [];
 		if (status.safeStorageAvailable) {
-			lines.push(`OS keychain: encrypted by your operating system (${status.safeStorageBackend ?? 'detected'}). Strongest, but only works on this machine.`);
+			lines.push(`OS keychain: encrypted by your operating system (${status.safeStorageBackend ?? 'detected'}), verified by a round-trip check. Strongest, but only works on this machine.`);
 		} else {
-			lines.push('OS keychain: not available on this device (no working keyring detected).');
+			lines.push('OS keychain: not available on this device (no working, verified keyring detected).');
 		}
-		lines.push('Passphrase: AES-GCM with PBKDF2-derived key. You enter a passphrase once per session. Works on every platform, including mobile.');
-		lines.push('Plaintext: no encryption. Any process running as your user can read your keys.');
+		lines.push('Passphrase: AES-GCM with an Argon2id-derived key (PBKDF2 fallback on devices that cannot run Argon2id). You enter a passphrase once per session. Works on every platform, including mobile.');
 		return lines.join(' ');
 	}
 
@@ -202,6 +217,7 @@ export class ReWriteSettingTab extends PluginSettingTab {
 					description: 'A passphrase will be used to encrypt your API keys. Store it in your password manager; there is no recovery if you forget it.',
 					confirmLabel: 'Save',
 					requireConfirm: true,
+					enforceStrength: true,
 					onSubmit: async (pass) => {
 						await changeEncryptionMode(this.plugin, 'passphrase', pass);
 						await this.plugin.refreshEncryptionStatus();
@@ -216,8 +232,7 @@ export class ReWriteSettingTab extends PluginSettingTab {
 			}
 			await changeEncryptionMode(this.plugin, next);
 			await this.plugin.refreshEncryptionStatus();
-			const label = next === 'safeStorage' ? 'OS keychain' : 'plaintext';
-			new Notice(`ReWrite: switched to ${label} storage.`);
+			new Notice('ReWrite: switched to OS keychain storage.');
 			this.display();
 		} catch (e) {
 			new Notice(`ReWrite: ${e instanceof Error ? e.message : String(e)}`);

@@ -421,6 +421,55 @@
 	margin-top: 16px;
 }
 
+/* Passphrase strength meter (create/change flows) */
+
+.rewrite-passphrase-modal .rewrite-passphrase-strength {
+	margin: 4px 0 12px;
+}
+
+.rewrite-passphrase-modal .rewrite-passphrase-strength-bar {
+	display: flex;
+	gap: 4px;
+}
+
+.rewrite-passphrase-modal .rewrite-passphrase-strength-seg {
+	flex: 1;
+	height: 5px;
+	border-radius: 3px;
+	background-color: var(--background-modifier-border);
+}
+
+.rewrite-passphrase-modal .rewrite-passphrase-strength-seg.is-filled.is-weak {
+	background-color: var(--color-red);
+}
+
+.rewrite-passphrase-modal .rewrite-passphrase-strength-seg.is-filled.is-fair {
+	background-color: var(--color-yellow);
+}
+
+.rewrite-passphrase-modal .rewrite-passphrase-strength-seg.is-filled.is-good {
+	background-color: var(--color-green);
+}
+
+.rewrite-passphrase-modal .rewrite-passphrase-strength-seg.is-filled.is-strong {
+	background-color: var(--color-green);
+}
+
+.rewrite-passphrase-modal .rewrite-passphrase-strength-text {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	margin-top: 4px;
+	min-height: 1.2em;
+}
+
+.rewrite-passphrase-modal .rewrite-passphrase-strength-text.is-acceptable {
+	color: var(--text-success, var(--color-green));
+}
+
+.rewrite-passphrase-modal .rewrite-passphrase-generate {
+	white-space: nowrap;
+}
+
 /* Locked card in the main modal */
 
 .rewrite-locked-card {

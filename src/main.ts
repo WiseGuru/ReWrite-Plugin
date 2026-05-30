@@ -17,7 +17,7 @@ import { isPathInTemplatesFolder, loadTemplatesFromFolder } from './templates-fo
 import { isPathSharedCore, loadSharedCoreFromFile } from './shared-core';
 import { isPathAssistantPrompt, loadAssistantPromptFromFile } from './assistant-prompt';
 import { isPathKnownNouns, loadKnownNounsFromFile } from './known-nouns';
-import { EncryptionStatus, getEncryptionStatus, unlockSecrets } from './secrets';
+import { changeEncryptionMode, EncryptionStatus, getEncryptionStatus, unlockSecrets } from './secrets';
 
 export default class ReWritePlugin extends Plugin implements PipelineHost {
 	settings!: GlobalSettings;
@@ -191,6 +191,28 @@ export default class ReWritePlugin extends Plugin implements PipelineHost {
 	}
 
 	promptUnlock(onUnlocked?: () => void): void {
+		// Unconfigured passphrase mode (no keychain device, first run) reports
+		// locked === true but has no passphrase yet: prompt to CREATE one rather
+		// than unlock. Configured-but-locked takes the unlock path.
+		if (!this.encryptionStatus.configured) {
+			new PassphraseModal({
+				app: this.app,
+				title: 'Set a passphrase',
+				description: 'No OS keychain is available on this device, so your API keys are encrypted with a passphrase you set. Store it in your password manager; there is no recovery if you forget it.',
+				confirmLabel: 'Save',
+				requireConfirm: true,
+				enforceStrength: true,
+				onSubmit: async (pass) => {
+					await changeEncryptionMode(this, 'passphrase', pass);
+					await hydrateSecrets(this, this.settings);
+					await this.refreshEncryptionStatus();
+					this.notifySecretsUnlocked();
+					onUnlocked?.();
+					new Notice('ReWrite: passphrase set. API keys are now encrypted.');
+				},
+			}).open();
+			return;
+		}
 		new PassphraseModal({
 			app: this.app,
 			title: 'Unlock API keys',

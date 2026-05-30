@@ -1,25 +1,53 @@
 import { normalizePath, Platform, Plugin } from 'obsidian';
+import { argon2id } from 'hash-wasm';
+import { isPassphraseAcceptable } from 'passphrase-strength';
 
 const SECRETS_FILE = 'secrets.json.nosync';
 const SECRETS_VERSION = 2;
 const VERIFIER_PLAINTEXT = 'rewrite-passphrase-verifier-v1';
+const SAFE_STORAGE_SELFTEST = 'rewrite-safestorage-selftest';
 const PBKDF2_ITERATIONS = 600_000;
-const PBKDF2_SALT_BYTES = 16;
+const KDF_SALT_BYTES = 16;
 const AES_IV_BYTES = 12;
 const VALUE_SEP = '.';
 
-export type EncryptionMode = 'safeStorage' | 'plaintext' | 'passphrase';
+// Argon2id parameters for new passphrase envelopes. Memory is capped at 32 MiB so
+// the weakest supported phone (params live in the ciphertext and must reproduce on
+// every device that opens the synced vault) can still allocate and unlock within the
+// ~0.5-1s budget. Higher would risk allocation failure on low-RAM mobile webviews.
+const ARGON2_MEM_KIB = 32_768; // 32 MiB
+const ARGON2_TIME = 3;
+const ARGON2_PARALLELISM = 1;
+const ARGON2_HASH_BYTES = 32;
+
+export type EncryptionMode = 'safeStorage' | 'passphrase';
 
 export interface EncryptionStatus {
 	mode: EncryptionMode;
+	// passphrase mode with a derived key not yet held in memory this session.
 	locked: boolean;
+	// passphrase mode that has actually had a passphrase set (kdf + verifier on disk).
+	// false = first run on a no-keychain device: prompt to CREATE a passphrase, not unlock.
+	configured: boolean;
+	// OS keychain present, verified by a round-trip self-test, and not a known-insecure backend.
 	safeStorageAvailable: boolean;
+	// OS keychain reports available but is effectively unencrypted (e.g. Chromium basic_text)
+	// or failed the round-trip; we do not offer it and steer the user to a passphrase.
+	safeStorageInsecure: boolean;
 	safeStorageBackend: string | null;
 }
 
+type KdfAlgo = 'pbkdf2' | 'argon2id';
+
 interface PassphraseKdf {
-	iterations: number;
+	algo: KdfAlgo;
 	salt: string; // base64
+	// pbkdf2
+	iterations?: number;
+	// argon2id
+	memKiB?: number;
+	timeCost?: number;
+	parallelism?: number;
 }
 
 interface SecretsEnvelope {
@@ -38,10 +66,13 @@ interface SafeStorageAPI {
 }
 
 let safeStorageCache: SafeStorageAPI | null | undefined;
+let verifiedSafeStorageCache: SafeStorageAPI | null | undefined;
 let cachedEnvelope: SecretsEnvelope | null = null;
 let unlockedKey: CryptoKey | null = null;
 
-function getSafeStorage(): SafeStorageAPI | null {
+// Raw electron safeStorage if the platform reports encryption available. Says nothing
+// about whether the backend actually encrypts (see getSafeStorage for that check).
+function getRawSafeStorage(): SafeStorageAPI | null {
 	if (safeStorageCache !== undefined) return safeStorageCache;
 	if (!Platform.isDesktop) {
 		safeStorageCache = null;
@@ -68,8 +99,46 @@ function getSafeStorage(): SafeStorageAPI | null {
 	return null;
 }
 
+// Verified, secure safeStorage: the backend is not the known-unencrypted Chromium
+// fallback (basic_text), AND an encrypt/decrypt round-trip of a sentinel succeeds.
+// Cached for the session. Used by encrypt/decrypt and the availability checks.
+function getSafeStorage(): SafeStorageAPI | null {
+	if (verifiedSafeStorageCache !== undefined) return verifiedSafeStorageCache;
+	const raw = getRawSafeStorage();
+	if (!raw) {
+		verifiedSafeStorageCache = null;
+		return null;
+	}
+	if (typeof raw.getSelectedStorageBackend === 'function') {
+		let backend: string | null = null;
+		try {
+			backend = raw.getSelectedStorageBackend();
+		} catch {
+			backend = null;
+		}
+		// basic_text is Chromium's last-resort backend on Linux and is not encrypted.
+		if (backend === 'basic_text') {
+			verifiedSafeStorageCache = null;
+			return null;
+		}
+	}
+	try {
+		const ct = raw.encryptString(SAFE_STORAGE_SELFTEST).toString('base64');
+		const pt = raw.decryptString(base64ToNodeBuffer(ct));
+		if (pt !== SAFE_STORAGE_SELFTEST) {
+			verifiedSafeStorageCache = null;
+			return null;
+		}
+	} catch {
+		verifiedSafeStorageCache = null;
+		return null;
+	}
+	verifiedSafeStorageCache = raw;
+	return raw;
+}
+
 function getSafeStorageBackend(): string | null {
-	const ss = getSafeStorage();
+	const ss = getRawSafeStorage();
 	if (!ss || typeof ss.getSelectedStorageBackend !== 'function') return null;
 	try {
 		return ss.getSelectedStorageBackend();
@@ -85,15 +154,36 @@ function secretsPath(plugin: Plugin): string {
 }
 
 function defaultEnvelope(): SecretsEnvelope {
+	// No keychain => passphrase mode, but UNCONFIGURED (no kdf/verifier). The first
+	// pipeline use / settings visit prompts the user to create a passphrase. Nothing
+	// is ever written in this state (saveManyKeys is a no-op while locked).
 	return {
 		version: SECRETS_VERSION,
-		mode: getSafeStorage() ? 'safeStorage' : 'plaintext',
+		mode: getSafeStorage() ? 'safeStorage' : 'passphrase',
 		keys: {},
 	};
 }
 
 function isObject(v: unknown): v is Record<string, unknown> {
 	return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+function parseKdf(raw: unknown): PassphraseKdf | undefined {
+	if (!isObject(raw) || typeof raw.salt !== 'string') return undefined;
+	if (raw.algo === 'argon2id') {
+		return {
+			algo: 'argon2id',
+			salt: raw.salt,
+			memKiB: typeof raw.memKiB === 'number' ? raw.memKiB : ARGON2_MEM_KIB,
+			timeCost: typeof raw.timeCost === 'number' ? raw.timeCost : ARGON2_TIME,
+			parallelism: typeof raw.parallelism === 'number' ? raw.parallelism : ARGON2_PARALLELISM,
+		};
+	}
+	// 'pbkdf2' or a legacy envelope with no algo field but an iterations count.
+	if (typeof raw.iterations === 'number') {
+		return { algo: 'pbkdf2', salt: raw.salt, iterations: raw.iterations };
+	}
+	return undefined;
 }
 
 function parseEnvelope(raw: string): SecretsEnvelope {
@@ -106,27 +196,24 @@ function parseEnvelope(raw: string): SecretsEnvelope {
 	if (!isObject(parsed)) return defaultEnvelope();
 	const version = typeof parsed.version === 'number' ? parsed.version : 1;
 	if (version !== SECRETS_VERSION) {
-		// Pre-release: no migrations. Treat unknown shapes as a fresh start.
-		// Existing v1 dev installs will need to re-enter their API keys.
+		// Pre-release: no migrations. Treat unknown shapes (incl. old 'plaintext'
+		// envelopes that fail the mode check below) as a fresh start.
 		return defaultEnvelope();
 	}
 	const mode = parsed.mode;
-	if (mode !== 'safeStorage' && mode !== 'plaintext' && mode !== 'passphrase') {
+	if (mode !== 'safeStorage' && mode !== 'passphrase') {
 		return defaultEnvelope();
 	}
 	const keys = isObject(parsed.keys) ? parsed.keys as Record<string, string> : {};
 	const envelope: SecretsEnvelope = { version, mode, keys };
 	if (mode === 'passphrase') {
-		const kdf = parsed.kdf;
-		if (isObject(kdf) && typeof kdf.iterations === 'number' && typeof kdf.salt === 'string') {
-			envelope.kdf = { iterations: kdf.iterations, salt: kdf.salt };
-		}
-		if (typeof parsed.verifier === 'string') {
-			envelope.verifier = parsed.verifier;
-		}
-		if (!envelope.kdf || !envelope.verifier) {
-			// Malformed passphrase envelope; treat as fresh start.
-			return defaultEnvelope();
+		const kdf = parseKdf(parsed.kdf);
+		const verifier = typeof parsed.verifier === 'string' ? parsed.verifier : undefined;
+		// Only a complete kdf+verifier pair counts as configured; otherwise the
+		// envelope is treated as unconfigured (prompt to create a passphrase).
+		if (kdf && verifier) {
+			envelope.kdf = kdf;
+			envelope.verifier = verifier;
 		}
 	}
 	return envelope;
@@ -183,7 +270,16 @@ function randomBytes(n: number): Uint8Array {
 	return out;
 }
 
-// ---------- WebCrypto passphrase helpers ----------
+// Heuristic: did an Argon2 derivation fail because the device couldn't allocate the
+// requested memory (or run wasm at all)? Used to fall back to PBKDF2 at creation and
+// to give a clear message at unlock.
+function isAllocationFailure(e: unknown): boolean {
+	if (e instanceof RangeError) return true;
+	const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
+	return msg.includes('memory') || msg.includes('alloc') || msg.includes('wasm') || msg.includes('webassembly');
+}
+
+// ---------- key derivation ----------
 
 async function deriveKeyFromPassphrase(passphrase: string, salt: Uint8Array, iterations: number): Promise<CryptoKey> {
 	const passBytes = new TextEncoder().encode(passphrase);
@@ -202,6 +298,73 @@ async function deriveKeyFromPassphrase(passphrase: string, salt: Uint8Array, ite
 		['encrypt', 'decrypt'],
 	);
 }
+
+async function deriveArgon2idKey(
+	passphrase: string,
+	salt: Uint8Array,
+	memKiB: number,
+	timeCost: number,
+	parallelism: number,
+): Promise<CryptoKey> {
+	const raw = await argon2id({
+		password: passphrase,
+		salt,
+		parallelism,
+		iterations: timeCost,
+		memorySize: memKiB,
+		hashLength: ARGON2_HASH_BYTES,
+		outputType: 'binary',
+	});
+	return crypto.subtle.importKey(
+		'raw',
+		raw as BufferSource,
+		{ name: 'AES-GCM' },
+		false,
+		['encrypt', 'decrypt'],
+	);
+}
+
+async function deriveKeyFromKdf(passphrase: string, kdf: PassphraseKdf): Promise<CryptoKey> {
+	const salt = base64ToBytes(kdf.salt);
+	if (kdf.algo === 'argon2id') {
+		return deriveArgon2idKey(
+			passphrase,
+			salt,
+			kdf.memKiB ?? ARGON2_MEM_KIB,
+			kdf.timeCost ?? ARGON2_TIME,
+			kdf.parallelism ?? ARGON2_PARALLELISM,
+		);
+	}
+	return deriveKeyFromPassphrase(passphrase, salt, kdf.iterations ?? PBKDF2_ITERATIONS);
+}
+
+// Build a fresh kdf + derived key for a new passphrase. Prefers Argon2id; on any
+// derivation failure (wasm unavailable / can't allocate memory) falls back to PBKDF2
+// so a constrained device can still set a passphrase.
+async function buildPassphraseKdfAndKey(passphrase: string): Promise<{ kdf: PassphraseKdf; key: CryptoKey }> {
+	const salt = randomBytes(KDF_SALT_BYTES);
+	try {
+		const key = await deriveArgon2idKey(passphrase, salt, ARGON2_MEM_KIB, ARGON2_TIME, ARGON2_PARALLELISM);
+		return {
+			kdf: {
+				algo: 'argon2id',
+				salt: bytesToBase64(salt),
+				memKiB: ARGON2_MEM_KIB,
+				timeCost: ARGON2_TIME,
+				parallelism: ARGON2_PARALLELISM,
+			},
+			key,
+		};
+	} catch {
+		const key = await deriveKeyFromPassphrase(passphrase, salt, PBKDF2_ITERATIONS);
+		return {
+			kdf: { algo: 'pbkdf2', salt: bytesToBase64(salt), iterations: PBKDF2_ITERATIONS },
+			key,
+		};
+	}
+}
+
+// ---------- AES-GCM value codec ----------
 
 async function aesGcmEncrypt(key: CryptoKey, plaintext: string): Promise<string> {
 	const iv = randomBytes(AES_IV_BYTES);
@@ -229,22 +392,18 @@ async function aesGcmDecrypt(key: CryptoKey, payload: string): Promise<string> {
 // ---------- per-mode encrypt/decrypt of a single value ----------
 
 async function encryptValue(envelope: SecretsEnvelope, plaintext: string): Promise<string> {
-	if (envelope.mode === 'plaintext') return plaintext;
 	if (envelope.mode === 'safeStorage') {
 		const ss = getSafeStorage();
-		if (!ss) throw new Error('safeStorage is unavailable on this device.');
+		if (!ss) throw new Error('OS keychain encryption is not available on this device.');
 		return ss.encryptString(plaintext).toString('base64');
 	}
-	if (envelope.mode === 'passphrase') {
-		if (!unlockedKey) throw new Error('Secrets are locked. Unlock with your passphrase first.');
-		return aesGcmEncrypt(unlockedKey, plaintext);
-	}
-	throw new Error(`Unknown encryption mode: ${envelope.mode as string}`);
+	// passphrase
+	if (!unlockedKey) throw new Error('Secrets are locked. Unlock with your passphrase first.');
+	return aesGcmEncrypt(unlockedKey, plaintext);
 }
 
 async function decryptValue(envelope: SecretsEnvelope, stored: string): Promise<string> {
 	if (stored === '') return '';
-	if (envelope.mode === 'plaintext') return stored;
 	if (envelope.mode === 'safeStorage') {
 		const ss = getSafeStorage();
 		if (!ss) return '';
@@ -254,25 +413,74 @@ async function decryptValue(envelope: SecretsEnvelope, stored: string): Promise<
 			return '';
 		}
 	}
-	if (envelope.mode === 'passphrase') {
-		if (!unlockedKey) return '';
-		try {
-			return await aesGcmDecrypt(unlockedKey, stored);
-		} catch {
-			return '';
-		}
+	// passphrase
+	if (!unlockedKey) return '';
+	try {
+		return await aesGcmDecrypt(unlockedKey, stored);
+	} catch {
+		return '';
 	}
-	return '';
+}
+
+async function decryptAllToPlain(envelope: SecretsEnvelope): Promise<Record<string, string>> {
+	const plain: Record<string, string> = {};
+	for (const id of Object.keys(envelope.keys)) {
+		const v = await decryptValue(envelope, envelope.keys[id] ?? '');
+		if (v) plain[id] = v;
+	}
+	return plain;
+}
+
+// Write a freshly-built passphrase envelope (kdf + verifier) and re-encrypt `plain`
+// under the new key. Sets unlockedKey. Used by mode change, change-passphrase, and
+// the unlock-time KDF upgrade. Does NOT enforce entropy (the caller does, when needed).
+async function writePassphraseEnvelope(
+	plugin: Plugin,
+	passphrase: string,
+	plain: Record<string, string>,
+): Promise<void> {
+	const { kdf, key } = await buildPassphraseKdfAndKey(passphrase);
+	unlockedKey = key;
+	const next: SecretsEnvelope = { version: SECRETS_VERSION, mode: 'passphrase', kdf, keys: {} };
+	next.verifier = await aesGcmEncrypt(key, VERIFIER_PLAINTEXT);
+	cachedEnvelope = next;
+	for (const id of Object.keys(plain)) {
+		next.keys[id] = await encryptValue(next, plain[id] ?? '');
+	}
+	await writeEnvelope(plugin, next);
+}
+
+// Best-effort upgrade of a legacy PBKDF2 envelope to Argon2id on unlock. Requires the
+// current (pbkdf2) key already in unlockedKey so we can read the stored values. If the
+// device can't run Argon2id, leaves the envelope on PBKDF2.
+async function tryUpgradeToArgon2id(plugin: Plugin, passphrase: string): Promise<void> {
+	const envelope = await ensureEnvelope(plugin);
+	if (envelope.mode !== 'passphrase' || envelope.kdf?.algo !== 'pbkdf2') return;
+	const plain = await decryptAllToPlain(envelope);
+	const built = await buildPassphraseKdfAndKey(passphrase);
+	if (built.kdf.algo !== 'argon2id') return; // device can't do Argon2id; keep PBKDF2
+	unlockedKey = built.key;
+	const next: SecretsEnvelope = { version: SECRETS_VERSION, mode: 'passphrase', kdf: built.kdf, keys: {} };
+	next.verifier = await aesGcmEncrypt(built.key, VERIFIER_PLAINTEXT);
+	cachedEnvelope = next;
+	for (const id of Object.keys(plain)) {
+		next.keys[id] = await encryptValue(next, plain[id] ?? '');
+	}
+	await writeEnvelope(plugin, next);
 }
 
 // ---------- public API ----------
 
 export async function getEncryptionStatus(plugin: Plugin): Promise<EncryptionStatus> {
 	const envelope = await ensureEnvelope(plugin);
+	const verified = getSafeStorage() !== null;
+	const raw = getRawSafeStorage() !== null;
 	return {
 		mode: envelope.mode,
 		locked: envelope.mode === 'passphrase' && unlockedKey === null,
-		safeStorageAvailable: getSafeStorage() !== null,
+		configured: envelope.mode !== 'passphrase' || (envelope.kdf != null && envelope.verifier != null),
+		safeStorageAvailable: verified,
+		safeStorageInsecure: raw && !verified,
 		safeStorageBackend: getSafeStorageBackend(),
 	};
 }
@@ -289,8 +497,18 @@ export async function unlockSecrets(plugin: Plugin, passphrase: string): Promise
 	const envelope = await ensureEnvelope(plugin);
 	if (envelope.mode !== 'passphrase') return true;
 	if (!envelope.kdf || !envelope.verifier) return false;
-	const salt = base64ToBytes(envelope.kdf.salt);
-	const candidate = await deriveKeyFromPassphrase(passphrase, salt, envelope.kdf.iterations);
+	let candidate: CryptoKey;
+	try {
+		candidate = await deriveKeyFromKdf(passphrase, envelope.kdf);
+	} catch (e) {
+		if (envelope.kdf.algo === 'argon2id' && isAllocationFailure(e)) {
+			const mib = Math.round((envelope.kdf.memKiB ?? ARGON2_MEM_KIB) / 1024);
+			throw new Error(
+				`This device can't allocate the ~${mib} MiB needed to unlock. These secrets were encrypted with Argon2id on a device with more memory.`,
+			);
+		}
+		return false;
+	}
 	try {
 		const decoded = await aesGcmDecrypt(candidate, envelope.verifier);
 		if (decoded !== VERIFIER_PLAINTEXT) return false;
@@ -298,6 +516,15 @@ export async function unlockSecrets(plugin: Plugin, passphrase: string): Promise
 		return false;
 	}
 	unlockedKey = candidate;
+	// Opportunistically migrate legacy PBKDF2 envelopes to Argon2id while we hold the
+	// passphrase. Best-effort: failures leave the envelope (and unlockedKey) on PBKDF2.
+	if (envelope.kdf.algo === 'pbkdf2') {
+		try {
+			await tryUpgradeToArgon2id(plugin, passphrase);
+		} catch {
+			// keep PBKDF2; nothing to do
+		}
+	}
 	return true;
 }
 
@@ -317,8 +544,8 @@ export async function saveKey(plugin: Plugin, id: string, key: string): Promise<
 export async function saveManyKeys(plugin: Plugin, updates: Record<string, string>): Promise<void> {
 	const envelope = await ensureEnvelope(plugin);
 	if (envelope.mode === 'passphrase' && unlockedKey === null) {
-		// Caller (settings save) may run while locked. Don't blow up; just skip writing
-		// secrets so we don't clobber the on-disk encrypted values with empties.
+		// Caller (settings save) may run while locked or unconfigured. Don't blow up;
+		// just skip writing so we don't clobber on-disk encrypted values with empties.
 		return;
 	}
 	for (const id of Object.keys(updates)) {
@@ -345,13 +572,8 @@ export async function deleteKey(plugin: Plugin, id: string): Promise<void> {
 
 export async function loadAllKeys(plugin: Plugin): Promise<Record<string, string>> {
 	const envelope = await ensureEnvelope(plugin);
-	const out: Record<string, string> = {};
-	if (envelope.mode === 'passphrase' && unlockedKey === null) return out;
-	for (const id of Object.keys(envelope.keys)) {
-		const value = await decryptValue(envelope, envelope.keys[id] ?? '');
-		if (value) out[id] = value;
-	}
-	return out;
+	if (envelope.mode === 'passphrase' && unlockedKey === null) return {};
+	return decryptAllToPlain(envelope);
 }
 
 // ---------- mode transitions ----------
@@ -363,38 +585,31 @@ export async function changeEncryptionMode(
 ): Promise<void> {
 	const envelope = await ensureEnvelope(plugin);
 	if (envelope.mode === newMode && newMode !== 'passphrase') return;
-	if (envelope.mode === 'passphrase' && unlockedKey === null) {
+	if (envelope.mode === 'passphrase' && unlockedKey === null && envelope.kdf) {
 		throw new Error('Unlock secrets with the current passphrase before changing modes.');
 	}
 	if (newMode === 'safeStorage' && !getSafeStorage()) {
 		throw new Error('OS keychain encryption is not available on this device.');
 	}
-	if (newMode === 'passphrase' && (!newPassphrase || newPassphrase.length === 0)) {
-		throw new Error('A passphrase is required to switch to passphrase mode.');
+	if (newMode === 'passphrase') {
+		if (!newPassphrase || newPassphrase.length === 0) {
+			throw new Error('A passphrase is required to switch to passphrase mode.');
+		}
+		if (!(await isPassphraseAcceptable(newPassphrase))) {
+			throw new Error('Passphrase is too weak. Use a longer, more unique passphrase (try the Generate button).');
+		}
 	}
 
-	const plain: Record<string, string> = {};
-	for (const id of Object.keys(envelope.keys)) {
-		const v = await decryptValue(envelope, envelope.keys[id] ?? '');
-		if (v) plain[id] = v;
-	}
-
-	const next: SecretsEnvelope = {
-		version: SECRETS_VERSION,
-		mode: newMode,
-		keys: {},
-	};
+	const plain = await decryptAllToPlain(envelope);
 
 	if (newMode === 'passphrase') {
-		const salt = randomBytes(PBKDF2_SALT_BYTES);
-		const newKey = await deriveKeyFromPassphrase(newPassphrase ?? '', salt, PBKDF2_ITERATIONS);
-		next.kdf = { iterations: PBKDF2_ITERATIONS, salt: bytesToBase64(salt) };
-		next.verifier = await aesGcmEncrypt(newKey, VERIFIER_PLAINTEXT);
-		unlockedKey = newKey;
-	} else {
-		unlockedKey = null;
+		await writePassphraseEnvelope(plugin, newPassphrase ?? '', plain);
+		return;
 	}
 
+	// safeStorage
+	unlockedKey = null;
+	const next: SecretsEnvelope = { version: SECRETS_VERSION, mode: 'safeStorage', keys: {} };
 	cachedEnvelope = next;
 	for (const id of Object.keys(plain)) {
 		next.keys[id] = await encryptValue(next, plain[id] ?? '');
@@ -407,7 +622,7 @@ export async function changePassphrase(plugin: Plugin, newPassphrase: string): P
 	if (envelope.mode !== 'passphrase') {
 		throw new Error('Not in passphrase mode.');
 	}
-	if (unlockedKey === null) {
+	if (unlockedKey === null && envelope.kdf) {
 		throw new Error('Unlock with the current passphrase first.');
 	}
 	if (newPassphrase.length === 0) {

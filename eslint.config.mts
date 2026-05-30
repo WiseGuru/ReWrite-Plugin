@@ -40,6 +40,7 @@ const REWRITE_BRANDS = [
 	"Ollama", "LM Studio",
 	"AssemblyAI", "Deepgram", "Rev.ai",
 	"whisper.cpp", "whisper-server", "faster-whisper-server",
+	"Argon2id", "Argon2", "zxcvbn", "diceware", "EFF",
 ];
 
 const REWRITE_ACRONYMS = [

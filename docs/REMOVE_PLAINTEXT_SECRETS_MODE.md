@@ -1,6 +1,6 @@
 # Plan: Remove the plaintext secrets mode; defer SecretStorage to GA
 
-Status: planned (not yet implemented). Captured 2026-05-28.
+Status: IMPLEMENTED 2026-05-30 (as part of FEATURES.md item 4, alongside keychain verification + Argon2id/entropy hardening). Kept for reference. Captured 2026-05-28.
 
 ## Context
 
