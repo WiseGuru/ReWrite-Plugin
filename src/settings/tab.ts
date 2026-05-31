@@ -555,9 +555,13 @@ export class ReWriteSettingTab extends PluginSettingTab {
 					? 'empty-cache'
 					: 'dropdown';
 
+		const docsUrl = isTranscription
+			? transcriptionModelDocsUrl(profile.transcriptionProvider)
+			: null;
+
 		const setting = new Setting(wrapper)
-			.setName(isTranscription ? 'Transcription model' : 'LLM model')
-			.setDesc(modelFieldDesc(hint, mode));
+			.setName(isTranscription ? 'Transcription model' : 'LLM model');
+		applyModelFieldDesc(setting, hint, mode, docsUrl);
 
 		const refresh = async (): Promise<void> => {
 			if (isTranscription) {
@@ -1105,6 +1109,44 @@ function modelFieldDesc(hint: string, mode: ModelFieldMode): string {
 			return `${hint} Pick a model, or choose Custom... to type one.`;
 		case 'custom':
 			return `${hint} Type a model ID, or use Back to list.`;
+	}
+}
+
+/**
+ * Sets the model-field description, appending a "list of models" external link when
+ * the provider has no listModels endpoint but does publish a models doc page
+ * (assemblyai, revai). Providers without a doc link get the plain string desc.
+ */
+function applyModelFieldDesc(
+	setting: Setting,
+	hint: string,
+	mode: ModelFieldMode,
+	docsUrl: string | null,
+): void {
+	const text = modelFieldDesc(hint, mode);
+	if (!docsUrl) {
+		setting.setDesc(text);
+		return;
+	}
+	const linkLabel = 'list of models';
+	const frag = document.createDocumentFragment();
+	frag.appendText(text ? `${text} See the ` : 'See the ');
+	const a = frag.createEl('a', { text: linkLabel, href: docsUrl });
+	a.target = '_blank';
+	a.rel = 'noopener noreferrer';
+	frag.appendText('.');
+	setting.setDesc(frag);
+}
+
+/** Models documentation page for providers that have no listModels endpoint. */
+function transcriptionModelDocsUrl(id: TranscriptionProviderID): string | null {
+	switch (id) {
+		case 'assemblyai':
+			return 'https://www.assemblyai.com/docs/getting-started/models';
+		case 'revai':
+			return 'https://docs.rev.ai/api/asynchronous/transcribers/';
+		default:
+			return null;
 	}
 }
 
