@@ -52,6 +52,7 @@ export const DEFAULT_SETTINGS: GlobalSettings = {
 	mobileProfile: MOBILE_DEFAULT_PROFILE,
 	defaultTemplateId: '',
 	lastUsedTemplateId: '',
+	quickRecordTemplateId: '',
 	recordingFormat: 'webm',
 	templatesFolderPath: 'ReWrite/Templates',
 	sharedCorePath: 'ReWrite/SharedCore.md',

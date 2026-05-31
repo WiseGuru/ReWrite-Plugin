@@ -13,8 +13,8 @@ guidance: |
   misheard variants so the LLM knows what to correct from.
 ---
 
-Hoxhunt: hawks hunt, hocks hunt
-Tofugu: toe fugue
+Qublith: cublith, koblith
+Project Marigold
 `;
 
 export async function loadKnownNounsFromFile(app: App, path: string): Promise<KnownNoun[]> {

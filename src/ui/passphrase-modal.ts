@@ -11,6 +11,10 @@ export interface PassphrasePromptParams {
 	confirmLabel?: string;
 	// When true, render a second "Confirm passphrase" field that must match.
 	requireConfirm?: boolean;
+	// When set, render a plain-text confirmation field above the passphrase that must
+	// exactly match this phrase before submit is allowed (e.g. "DELETE APIS" for the
+	// destructive reset flow).
+	requirePhrase?: string;
 	// When true (create/change flows), render the strength meter + Generate button and
 	// block submit below MIN_PASSPHRASE_SCORE. Leave false for the unlock flow.
 	enforceStrength?: boolean;
@@ -21,11 +25,13 @@ export interface PassphrasePromptParams {
 export class PassphraseModal extends Modal {
 	private passphrase = '';
 	private confirm = '';
+	private phrase = '';
 	private busy = false;
 	private errorEl: HTMLElement | null = null;
 	private tipsEl: HTMLDetailsElement | null = null;
 	private passInput: HTMLInputElement | null = null;
 	private confirmInput: HTMLInputElement | null = null;
+	private phraseInput: HTMLInputElement | null = null;
 	private strengthBarEl: HTMLElement | null = null;
 	private strengthTextEl: HTMLElement | null = null;
 	private strengthTimer: number | null = null;
@@ -43,6 +49,19 @@ export class PassphraseModal extends Modal {
 
 		if (this.params.description) {
 			contentEl.createEl('p', { text: this.params.description, cls: 'rewrite-passphrase-desc' });
+		}
+
+		if (this.params.requirePhrase) {
+			const phrase = this.params.requirePhrase;
+			new Setting(contentEl)
+				.setName(`Type "${phrase}" to confirm`)
+				.setDesc('This permanently deletes all stored API keys.')
+				.addText((t) => {
+					t.inputEl.addClass('rewrite-passphrase-confirm-phrase');
+					this.phraseInput = t.inputEl;
+					t.onChange((v) => { this.phrase = v; });
+					t.inputEl.addEventListener('keydown', (e) => this.onKeydown(e));
+				});
 		}
 
 		if (this.params.requireConfirm) {
@@ -118,6 +137,7 @@ export class PassphraseModal extends Modal {
 		this.strengthTextEl = null;
 		this.passphrase = '';
 		this.confirm = '';
+		this.phrase = '';
 		this.contentEl.empty();
 	}
 
@@ -250,6 +270,10 @@ export class PassphraseModal extends Modal {
 		if (this.busy) return;
 		this.clearError();
 
+		if (this.params.requirePhrase && this.phrase !== this.params.requirePhrase) {
+			this.setError(`Type "${this.params.requirePhrase}" exactly to confirm.`);
+			return;
+		}
 		if (this.passphrase.length === 0) {
 			this.setError('Enter a passphrase.');
 			return;

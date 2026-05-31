@@ -19,7 +19,7 @@ import { populateDefaultTemplates } from '../templates-folder';
 import { populateDefaultSharedCore } from '../shared-core';
 import { populateDefaultAssistantPrompt } from '../assistant-prompt';
 import { populateDefaultKnownNouns } from '../known-nouns';
-import { changeEncryptionMode, EncryptionMode, lockSecrets } from '../secrets';
+import { changeEncryptionMode, EncryptionMode, lockSecrets, resetSecrets } from '../secrets';
 import { hydrateSecrets } from '.';
 import { PassphraseModal } from '../ui/passphrase-modal';
 
@@ -58,6 +58,10 @@ export class ReWriteSettingTab extends PluginSettingTab {
 	// fields (provider, insertMode, activeProfileOverride).
 	private inactiveProfileExpanded = false;
 
+	// Guards the encryption-mode dropdown against a second change racing the first
+	// while its async re-encryption + re-render is still in flight.
+	private modeChangeInFlight = false;
+
 	constructor(app: App, private readonly plugin: ReWritePlugin) {
 		super(app, plugin);
 	}
@@ -91,6 +95,20 @@ export class ReWriteSettingTab extends PluginSettingTab {
 		setIcon(iconEl, icon);
 		setting.nameEl.prepend(iconEl);
 		return setting;
+	}
+
+	// Disables a settings button for the duration of its async handler so a rapid
+	// double-click cannot launch the work (and its full-container re-render) twice
+	// before the first invocation yields. The handler keeps its own try/catch; this
+	// only owns the in-flight guard, re-enabling in `finally` (harmless when the
+	// handler ended in `this.display()` and detached the button).
+	private async runGuardedButton(b: { setDisabled(disabled: boolean): unknown }, fn: () => Promise<void>): Promise<void> {
+		b.setDisabled(true);
+		try {
+			await fn();
+		} finally {
+			b.setDisabled(false);
+		}
 	}
 
 	private apiKeyPlaceholder(): string {
@@ -131,6 +149,8 @@ export class ReWriteSettingTab extends PluginSettingTab {
 			unlockBtn.addEventListener('click', () => {
 				this.plugin.promptUnlock(() => this.display());
 			});
+			const resetBtn = banner.createEl('button', { text: 'Forgot passphrase? Reset', cls: 'mod-warning' });
+			resetBtn.addEventListener('click', () => this.openResetModal());
 		} else if (status.mode === 'safeStorage') {
 			banner.addClass('is-ok');
 			const backend = status.safeStorageBackend ? ` (${status.safeStorageBackend})` : '';
@@ -197,14 +217,36 @@ export class ReWriteSettingTab extends PluginSettingTab {
 				.setName('Lock now')
 				.setDesc('Forgets the passphrase in memory. You will need to re-enter it before recording.')
 				.addButton((b) => {
-					b.setButtonText('Lock').onClick(async () => {
+					b.setButtonText('Lock').onClick(() => void this.runGuardedButton(b, async () => {
 						lockSecrets();
 						await hydrateSecrets(this.plugin, this.plugin.settings);
 						await this.plugin.refreshEncryptionStatus();
 						this.display();
-					});
+					}));
 				});
 		}
+	}
+
+	private openResetModal(): void {
+		new PassphraseModal({
+			app: this.app,
+			title: 'Reset API key passphrase',
+			description: 'Forgot your passphrase? This permanently deletes every stored API key and sets a new passphrase. The old keys cannot be recovered; you will re-enter each API key afterward.',
+			confirmLabel: 'Delete keys and set passphrase',
+			requirePhrase: 'DELETE APIS',
+			requireConfirm: true,
+			enforceStrength: true,
+			onSubmit: async (pass) => {
+				await resetSecrets(this.plugin, pass);
+				// Old in-memory keys are gone; re-hydrate to empty them so a later save
+				// cannot rewrite stale values, then refresh status and re-render.
+				await hydrateSecrets(this.plugin, this.plugin.settings);
+				await this.plugin.refreshEncryptionStatus();
+				this.plugin.notifySecretsUnlocked();
+				new Notice('ReWrite: API keys cleared. New passphrase set.');
+				this.display();
+			},
+		}).open();
 	}
 
 	private encryptionModeDescription(status: { mode: EncryptionMode; safeStorageAvailable: boolean; safeStorageBackend: string | null }): string {
@@ -219,6 +261,8 @@ export class ReWriteSettingTab extends PluginSettingTab {
 	}
 
 	private async handleModeChange(next: EncryptionMode): Promise<void> {
+		if (this.modeChangeInFlight) return;
+		this.modeChangeInFlight = true;
 		try {
 			if (next === 'passphrase') {
 				new PassphraseModal({
@@ -245,9 +289,12 @@ export class ReWriteSettingTab extends PluginSettingTab {
 			new Notice('ReWrite: switched to OS keychain storage.');
 			this.display();
 		} catch (e) {
+			console.error('ReWrite: encryption mode change failed', e);
 			new Notice(`ReWrite: ${e instanceof Error ? e.message : String(e)}`);
 			await this.plugin.refreshEncryptionStatus();
 			this.display();
+		} finally {
+			this.modeChangeInFlight = false;
 		}
 	}
 
@@ -635,7 +682,7 @@ export class ReWriteSettingTab extends PluginSettingTab {
 
 		new Setting(parent)
 			.setName('Extra args')
-			.setDesc('Space-separated CLI args appended after -m, --port.')
+			.setDesc('Space-separated CLI args appended after -m, --port. Split on whitespace only, so a single value containing spaces (such as a quoted path) is not supported.')
 			.addText((t) => {
 				t.setValue(cfg.extraArgs);
 				t.onChange(async (v) => {
@@ -650,36 +697,39 @@ export class ReWriteSettingTab extends PluginSettingTab {
 		const statusSetting = new Setting(parent).setName('Status').setDesc(formatWhisperStatus(snap));
 		statusSetting.addButton((b) => {
 			if (snap.status === 'running' || snap.status === 'starting') {
-				b.setButtonText('Stop').onClick(async () => {
+				b.setButtonText('Stop').onClick(() => void this.runGuardedButton(b, async () => {
 					try {
 						await host.stop();
 					} catch (e) {
+						console.error('ReWrite: whisper-host stop failed', e);
 						new Notice(e instanceof Error ? e.message : String(e));
 					}
 					this.display();
-				});
+				}));
 			} else if (snap.status === 'external') {
 				b.setButtonText('External').setDisabled(true).setTooltip('Not started by ReWrite. Stop the process from your task manager.');
 			} else {
-				b.setButtonText('Start').setCta().onClick(async () => {
+				b.setButtonText('Start').setCta().onClick(() => void this.runGuardedButton(b, async () => {
 					try {
 						await host.start(cfg);
 					} catch (e) {
+						console.error('ReWrite: whisper-host start failed', e);
 						new Notice(e instanceof Error ? e.message : String(e));
 					}
 					this.display();
-				});
+				}));
 			}
 		});
 		statusSetting.addExtraButton((b) => {
-			b.setIcon('refresh-cw').setTooltip('Probe the configured port for an existing server').onClick(async () => {
+			b.setIcon('refresh-cw').setTooltip('Probe the configured port for an existing server').onClick(() => void this.runGuardedButton(b, async () => {
 				try {
 					await host.probe(cfg);
 				} catch (e) {
+					console.error('ReWrite: whisper-host probe failed', e);
 					new Notice(e instanceof Error ? e.message : String(e));
 				}
 				this.display();
-			});
+			}));
 		});
 
 		const log = host.getLog();
@@ -716,7 +766,7 @@ export class ReWriteSettingTab extends PluginSettingTab {
 			.setName('Populate with default templates')
 			.setDesc('Writes the seven built-in templates into the folder above, plus the shared core file if it is missing. It skips any template that already exists, so you can run it again to top up after deleting one.')
 			.addButton((b) => {
-				b.setButtonText('Populate').setCta().onClick(async () => {
+				b.setButtonText('Populate').setCta().onClick(() => void this.runGuardedButton(b, async () => {
 					try {
 						const result = await populateDefaultTemplates(this.app, s.templatesFolderPath);
 						await this.plugin.refreshTemplates();
@@ -728,9 +778,10 @@ export class ReWriteSettingTab extends PluginSettingTab {
 						new Notice(`ReWrite: populated ${result.folder}. Created ${result.created}, skipped ${result.skipped}.${coreNote}`);
 						this.display();
 					} catch (e) {
+						console.error('ReWrite: populate templates failed', e);
 						new Notice(`ReWrite: populate failed. ${e instanceof Error ? e.message : String(e)}`);
 					}
-				});
+				}));
 			});
 
 		const loaded = this.plugin.templates;
@@ -738,6 +789,18 @@ export class ReWriteSettingTab extends PluginSettingTab {
 			? 'No templates loaded. Set a folder path and click Populate, or add your own Markdown files there.'
 			: `Loaded ${loaded.length} template${loaded.length === 1 ? '' : 's'}: ${loaded.map((t) => t.name).join(', ')}.`;
 		parent.createEl('p', { text: listDesc, cls: 'rewrite-section-desc' });
+
+		// Surface templates that opt out of the shared core: doing so drops the
+		// anti-injection guardrail and output discipline that the shared core carries,
+		// so the user should know which templates run without it.
+		const noGuardrail = loaded.filter((t) => t.disableSharedCore === true);
+		if (noGuardrail.length > 0) {
+			const warn = parent.createEl('p', { cls: 'rewrite-section-desc rewrite-warning-text' });
+			warn.createEl('strong', { text: 'Shared core disabled: ' });
+			warn.createSpan({
+				text: `${noGuardrail.map((t) => t.name).join(', ')}. ${noGuardrail.length === 1 ? 'This template runs' : 'These templates run'} without the shared core, so the anti-injection guardrail and output rules it carries do not apply. Vault and transcript text reach the model with less protection.`,
+			});
+		}
 
 		if (loaded.length > 0) {
 			new Setting(parent)
@@ -749,6 +812,19 @@ export class ReWriteSettingTab extends PluginSettingTab {
 					dd.setValue(loaded.some((t) => t.id === s.defaultTemplateId) ? s.defaultTemplateId : '');
 					dd.onChange(async (v) => {
 						s.defaultTemplateId = v;
+						await this.commit();
+					});
+				});
+
+			new Setting(parent)
+				.setName('Quick record (set template)')
+				.setDesc('Template used by the quick record (set template) command.')
+				.addDropdown((dd) => {
+					dd.addOption('', '(none, choose one)');
+					for (const tpl of loaded) dd.addOption(tpl.id, tpl.name);
+					dd.setValue(loaded.some((t) => t.id === s.quickRecordTemplateId) ? s.quickRecordTemplateId : '');
+					dd.onChange(async (v) => {
+						s.quickRecordTemplateId = v;
 						await this.commit();
 					});
 				});
@@ -847,7 +923,7 @@ export class ReWriteSettingTab extends PluginSettingTab {
 				.setName('Populate default assistant prompt')
 				.setDesc('Writes the built-in default into the file above. Skipped if the file already exists.')
 				.addButton((b) => {
-					b.setButtonText('Populate').setCta().onClick(async () => {
+					b.setButtonText('Populate').setCta().onClick(() => void this.runGuardedButton(b, async () => {
 						try {
 							const created = await populateDefaultAssistantPrompt(this.app, this.plugin.settings.assistantPromptPath);
 							await this.plugin.refreshAssistantPrompt();
@@ -856,9 +932,10 @@ export class ReWriteSettingTab extends PluginSettingTab {
 								: `ReWrite: ${this.plugin.settings.assistantPromptPath} already exists.`);
 							this.display();
 						} catch (e) {
+							console.error('ReWrite: populate assistant prompt failed', e);
 							new Notice(`ReWrite: ${e instanceof Error ? e.message : String(e)}`);
 						}
-					});
+					}));
 				})
 				.addExtraButton((b) => {
 					b.setIcon('external-link').setTooltip('Open file in a new pane').onClick(() => {
@@ -910,7 +987,7 @@ export class ReWriteSettingTab extends PluginSettingTab {
 			.setName('Re-create shared core file')
 			.setDesc('Writes a starter file with the default shared core. Skipped if the file already exists; delete the file first to restore the default.')
 			.addButton((b) => {
-				b.setButtonText('Populate').setCta().onClick(async () => {
+				b.setButtonText('Populate').setCta().onClick(() => void this.runGuardedButton(b, async () => {
 					try {
 						const created = await populateDefaultSharedCore(this.app, this.plugin.settings.sharedCorePath);
 						await this.plugin.refreshSharedCore();
@@ -919,9 +996,10 @@ export class ReWriteSettingTab extends PluginSettingTab {
 							: `ReWrite: ${this.plugin.settings.sharedCorePath} already exists.`);
 						this.display();
 					} catch (e) {
+						console.error('ReWrite: populate shared core failed', e);
 						new Notice(`ReWrite: ${e instanceof Error ? e.message : String(e)}`);
 					}
-				});
+				}));
 			})
 			.addExtraButton((b) => {
 				b.setIcon('external-link').setTooltip('Open file in a new pane').onClick(() => {
@@ -967,7 +1045,7 @@ export class ReWriteSettingTab extends PluginSettingTab {
 			.setName('Populate default known nouns')
 			.setDesc('Writes a starter file with guidance frontmatter and example nouns. Skipped if the file already exists.')
 			.addButton((b) => {
-				b.setButtonText('Populate').setCta().onClick(async () => {
+				b.setButtonText('Populate').setCta().onClick(() => void this.runGuardedButton(b, async () => {
 					try {
 						const created = await populateDefaultKnownNouns(this.app, this.plugin.settings.knownNounsPath);
 						await this.plugin.refreshKnownNouns();
@@ -976,9 +1054,10 @@ export class ReWriteSettingTab extends PluginSettingTab {
 							: `ReWrite: ${this.plugin.settings.knownNounsPath} already exists.`);
 						this.display();
 					} catch (e) {
+						console.error('ReWrite: populate known nouns failed', e);
 						new Notice(`ReWrite: ${e instanceof Error ? e.message : String(e)}`);
 					}
-				});
+				}));
 			})
 			.addExtraButton((b) => {
 				b.setIcon('external-link').setTooltip('Open file in a new pane').onClick(() => {

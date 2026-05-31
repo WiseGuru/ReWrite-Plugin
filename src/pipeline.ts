@@ -128,18 +128,5 @@ async function cleanupTranscript(params: PipelineParams, transcript: string): Pr
 	}
 
 	const llm = createLLMProvider(params.profile.llmProvider);
-	try {
-		return await llm.complete(systemPrompt, workingTranscript, params.profile.llmConfig, params.signal);
-	} catch (e) {
-		const original = e instanceof Error ? e : new Error(String(e));
-		try {
-			await navigator.clipboard.writeText(workingTranscript);
-			throw new Error(`${original.message} (Raw transcript copied to clipboard as fallback.)`);
-		} catch (clipErr) {
-			if (clipErr instanceof Error && clipErr.message.includes('copied to clipboard')) {
-				throw clipErr;
-			}
-			throw new Error(`${original.message} (Clipboard fallback also failed.)`);
-		}
-	}
+	return await llm.complete(systemPrompt, workingTranscript, params.profile.llmConfig, params.signal);
 }

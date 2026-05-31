@@ -617,6 +617,23 @@ export async function changeEncryptionMode(
 	await writeEnvelope(plugin, next);
 }
 
+// Forgot-passphrase recovery. Discards all existing key material (the old keys are
+// unrecoverable without the old passphrase) and writes a fresh, empty passphrase envelope
+// under a new passphrase. Unlike changePassphrase, this does NOT require unlocking first.
+export async function resetSecrets(plugin: Plugin, newPassphrase: string): Promise<void> {
+	if (newPassphrase.length === 0) {
+		throw new Error('A passphrase is required.');
+	}
+	if (!(await isPassphraseAcceptable(newPassphrase))) {
+		throw new Error('Passphrase is too weak. Use a longer, more unique passphrase (try the Generate button).');
+	}
+	// The old passphrase is forgotten, so the old keys are gone for good. Drop any cached
+	// state and write a fresh, empty passphrase envelope under the new key.
+	unlockedKey = null;
+	cachedEnvelope = null;
+	await writePassphraseEnvelope(plugin, newPassphrase, {});
+}
+
 export async function changePassphrase(plugin: Plugin, newPassphrase: string): Promise<void> {
 	const envelope = await ensureEnvelope(plugin);
 	if (envelope.mode !== 'passphrase') {

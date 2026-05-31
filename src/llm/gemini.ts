@@ -28,7 +28,7 @@ export function createGeminiLLM(): LLMProvider {
 		): Promise<string> {
 			if (!config.apiKey) throw new Error('gemini: API key is not configured');
 			if (!config.model) throw new Error('gemini: model is not configured');
-			const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(config.model)}:generateContent?key=${encodeURIComponent(config.apiKey)}`;
+			const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(config.model)}:generateContent`;
 			const body: Record<string, unknown> = {
 				system_instruction: { parts: [{ text: systemPrompt }] },
 				contents: [{ parts: [{ text: userMessage }] }],
@@ -40,7 +40,7 @@ export function createGeminiLLM(): LLMProvider {
 				'gemini',
 				url,
 				body,
-				{},
+				{ 'x-goog-api-key': config.apiKey },
 				signal,
 			);
 			if (response.promptFeedback?.blockReason) {
@@ -58,8 +58,8 @@ export function createGeminiLLM(): LLMProvider {
 		},
 		async listModels(config, signal) {
 			if (!config.apiKey) throw new Error('gemini: API key is not configured');
-			const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(config.apiKey)}&pageSize=1000`;
-			const response = await jsonGet<GeminiModelsResponse>('gemini', url, {}, signal);
+			const url = `https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000`;
+			const response = await jsonGet<GeminiModelsResponse>('gemini', url, { 'x-goog-api-key': config.apiKey }, signal);
 			const out: string[] = [];
 			for (const row of response.models ?? []) {
 				const methods = Array.isArray(row.supportedGenerationMethods)

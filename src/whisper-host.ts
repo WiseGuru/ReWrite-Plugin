@@ -102,10 +102,6 @@ function getNodeApi(): NodeAPI | null {
 	}
 }
 
-export function isWhisperHostAvailable(): boolean {
-	return getNodeApi() !== null;
-}
-
 export function formatWhisperStatus(snap: WhisperSnapshot): string {
 	switch (snap.status) {
 		case 'stopped':

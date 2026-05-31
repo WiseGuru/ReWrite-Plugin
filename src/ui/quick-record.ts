@@ -1,4 +1,4 @@
-import { Notice } from 'obsidian';
+import { App, Notice, Platform } from 'obsidian';
 import type ReWritePlugin from '../main';
 import { PipelineSource, PipelineStage, runPipeline } from '../pipeline';
 import { isMediaRecorderAvailable, resolveActiveProfile } from '../platform';
@@ -18,6 +18,7 @@ export class QuickRecordController {
 		private readonly plugin: ReWritePlugin,
 		template: NoteTemplate,
 		private readonly onDispose: () => void,
+		private readonly stopHotkey: string | null = null,
 	) {
 		this.template = template;
 	}
@@ -37,6 +38,7 @@ export class QuickRecordController {
 				this.floater?.setTemplateName(t.name);
 			},
 			initialTemplateName: this.template.name,
+			stopHotkey: this.stopHotkey,
 		});
 		this.timerHandle = window.setInterval(() => {
 			const ms = this.recorder?.getElapsedMs() ?? 0;
@@ -106,6 +108,7 @@ export class QuickRecordController {
 export async function startQuickRecord(
 	plugin: ReWritePlugin,
 	onDispose: () => void,
+	opts?: { template?: NoteTemplate; commandId?: string },
 ): Promise<QuickRecordController | null> {
 	const settings = plugin.settings;
 	const { profile } = resolveActiveProfile(settings);
@@ -128,7 +131,7 @@ export async function startQuickRecord(
 		return null;
 	}
 
-	const template = pickQuickRecordTemplate(plugin);
+	const template = opts?.template ?? pickQuickRecordTemplate(plugin);
 	if (!template) {
 		new Notice('ReWrite: add a template before using quick record.');
 		new ReWriteModal(plugin.app, plugin).open();
@@ -141,7 +144,8 @@ export async function startQuickRecord(
 		return null;
 	}
 
-	const controller = new QuickRecordController(plugin, template, onDispose);
+	const stopHotkey = opts?.commandId ? formatCommandHotkey(plugin.app, opts.commandId) : null;
+	const controller = new QuickRecordController(plugin, template, onDispose, stopHotkey);
 	try {
 		await controller.begin();
 	} catch (e) {
@@ -157,10 +161,41 @@ function pickQuickRecordTemplate(plugin: ReWritePlugin): NoteTemplate | undefine
 	const s = plugin.settings;
 	const templates = plugin.templates;
 	return (
-		templates.find((t) => t.id === s.defaultTemplateId)
-		?? templates.find((t) => t.id === s.lastUsedTemplateId)
+		templates.find((t) => t.id === s.lastUsedTemplateId)
+		?? templates.find((t) => t.id === s.defaultTemplateId)
 		?? templates[0]
 	);
+}
+
+interface Hotkey {
+	modifiers: string[];
+	key: string;
+}
+
+interface HotkeyManager {
+	getHotkeys(id: string): Hotkey[] | undefined;
+	getDefaultHotkeys(id: string): Hotkey[] | undefined;
+}
+
+// Obsidian's hotkey manager is internal and not in the public typings; read through a
+// narrow cast. Returns null when the command has no binding (custom or default).
+function formatCommandHotkey(app: App, commandId: string): string | null {
+	const manager = (app as unknown as { hotkeyManager?: HotkeyManager }).hotkeyManager;
+	if (!manager) return null;
+	const hotkeys = manager.getHotkeys(commandId) ?? manager.getDefaultHotkeys(commandId);
+	const hotkey = hotkeys?.[0];
+	if (!hotkey) return null;
+	const mac = Platform.isMacOS;
+	const symbols: Record<string, string> = {
+		Mod: mac ? '⌘' : 'Ctrl',
+		Meta: mac ? '⌘' : 'Win',
+		Ctrl: 'Ctrl',
+		Shift: mac ? '⇧' : 'Shift',
+		Alt: mac ? '⌥' : 'Alt',
+	};
+	const parts = hotkey.modifiers.map((m) => symbols[m] ?? m);
+	parts.push(hotkey.key.length === 1 ? hotkey.key.toUpperCase() : hotkey.key);
+	return mac ? parts.join('') : parts.join('+');
 }
 
 interface QuickRecordFloaterOptions {
@@ -170,6 +205,7 @@ interface QuickRecordFloaterOptions {
 	getActiveTemplateId: () => string;
 	onPickTemplate: (t: NoteTemplate) => void;
 	initialTemplateName: string;
+	stopHotkey?: string | null;
 }
 
 class QuickRecordFloater {
@@ -201,6 +237,13 @@ class QuickRecordFloater {
 			e.stopPropagation();
 			this.togglePopover();
 		});
+
+		if (options.stopHotkey) {
+			this.el.createSpan({
+				cls: 'rewrite-quick-stop-hint',
+				text: `Press ${options.stopHotkey} or`,
+			});
+		}
 
 		const stopBtn = this.el.createEl('button', {
 			text: 'Stop',

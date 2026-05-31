@@ -42,7 +42,7 @@ export default class ReWritePlugin extends Plugin implements PipelineHost {
 				} else if (snap.status === 'external') {
 					new Notice(`ReWrite: detected external whisper-server on ${snap.baseUrl}. Transcription will use it; ReWrite won't stop it.`);
 				}
-			}).catch(() => { /* non-fatal */ });
+			}).catch((e) => { console.error('ReWrite: whisper-host probe failed', e); });
 		}
 		this.addSettingTab(new ReWriteSettingTab(this.app, this));
 
@@ -60,9 +60,17 @@ export default class ReWritePlugin extends Plugin implements PipelineHost {
 
 		this.addCommand({
 			id: 'quick-record',
-			name: 'Quick record',
+			name: 'Quick record (last used)',
 			callback: () => {
 				void this.toggleQuickRecord();
+			},
+		});
+
+		this.addCommand({
+			id: 'quick-record-fixed',
+			name: 'Quick record (set template)',
+			callback: () => {
+				void this.toggleQuickRecord({ fixed: true });
 			},
 		});
 
@@ -186,7 +194,7 @@ export default class ReWritePlugin extends Plugin implements PipelineHost {
 
 	notifySecretsUnlocked(): void {
 		for (const cb of this.unlockListeners) {
-			try { cb(); } catch { /* swallow */ }
+			try { cb(); } catch (e) { console.error('ReWrite: secrets-unlocked listener failed', e); }
 		}
 	}
 
@@ -273,6 +281,7 @@ export default class ReWritePlugin extends Plugin implements PipelineHost {
 		try {
 			await this.whisperHost.start(this.settings.localWhisper);
 		} catch (e) {
+			console.error('ReWrite: whisper-host start failed', e);
 			new Notice(e instanceof Error ? e.message : String(e));
 		}
 	}
@@ -281,18 +290,28 @@ export default class ReWritePlugin extends Plugin implements PipelineHost {
 		try {
 			await this.whisperHost.stop();
 		} catch (e) {
+			console.error('ReWrite: whisper-host stop failed', e);
 			new Notice(e instanceof Error ? e.message : String(e));
 		}
 	}
 
-	private async toggleQuickRecord(): Promise<void> {
+	private async toggleQuickRecord(opts?: { fixed?: boolean }): Promise<void> {
 		if (this.activeQuickRecord) {
 			await this.activeQuickRecord.finish();
 			return;
 		}
+		const commandId = `${this.manifest.id}:${opts?.fixed ? 'quick-record-fixed' : 'quick-record'}`;
+		let template: NoteTemplate | undefined;
+		if (opts?.fixed) {
+			template = this.templates.find((t) => t.id === this.settings.quickRecordTemplateId);
+			if (!template) {
+				new Notice('ReWrite: choose a quick record template in settings.');
+				return;
+			}
+		}
 		this.activeQuickRecord = await startQuickRecord(this, () => {
 			this.activeQuickRecord = null;
-		});
+		}, { template, commandId });
 	}
 
 	private processTextWithTemplate(preResolved?: TextResolution): void {

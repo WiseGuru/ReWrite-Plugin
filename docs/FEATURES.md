@@ -31,6 +31,23 @@ Add a "Long-form audio (lectures, podcasts)" section to the README (or a `docs/L
 
 If a hosted-YouTube-fetch feature is ever requested later, the shell-out-to-`yt-dlp` adapter is still the right shape (desktop only, user-supplied binary path, mirrors the local-whisper.cpp pattern), but ship that only on demand.
 
+### 4. Speaker identification (diarization) for recorded/long-form audio
+
+Opt-in mode where the transcription provider returns speaker-attributed text (e.g. `Speaker A: ...` / `Speaker B: ...`) and the attribution is preserved through cleanup into the inserted note. Natural fit for meetings, interviews, and multi-host podcasts. Item #3 already documents the provider support matrix as a transcript caveat; this item promotes it into a tracked, opt-in feature.
+
+**Provider gating.** Enable only for providers that expose diarization: AssemblyAI (`speaker_labels: true`, returns an `utterances[]` array), Deepgram (`diarize=true`), and Rev.ai. Disabled/hidden for OpenAI Whisper, Groq, Mistral Voxtral, and local whisper.cpp (no diarization). Gate the toggle the same way the `whisper-local` option is platform-gated in [src/settings/tab.ts](../src/settings/tab.ts) and [src/ui/setup-card.ts](../src/ui/setup-card.ts): show it only when the active profile's transcription provider supports diarization.
+
+**Interface decision (load-bearing).** `TranscriptionProvider.transcribe()` returns `Promise<string>` today ([src/transcription/index.ts](../src/transcription/index.ts) lines 12-16). Two options:
+
+1. **Embed labels into the returned string** (`Speaker A: ...\n\nSpeaker B: ...`) inside each capable adapter, leaving the interface and the rest of the pipeline untouched; the LLM cleanup treats the labels as ordinary text. Lowest-risk, ships fastest. **Recommended as the v1 shape.**
+2. Extend the return type to carry structured segments (`{ speaker, text }[]`). Only worth it if a later feature needs the structure (per-speaker callouts, styling). Defer until something asks for it.
+
+**Config + settings.** Add a per-profile opt-in flag (e.g. `TranscriptionConfig.diarize?: boolean` in [src/types.ts](../src/types.ts), alongside `apiKey`/`baseUrl`/`model`/`language`), surfaced as a toggle in the per-profile transcription section of the settings tab, shown only for diarization-capable providers. Each capable adapter reads the flag and sets the provider-specific request parameter: [src/transcription/assemblyai.ts](../src/transcription/assemblyai.ts) additionally has to request `speaker_labels` and format the returned `utterances[]` into labeled text (it currently reads the flat `text` field), [src/transcription/deepgram.ts](../src/transcription/deepgram.ts) sets `diarize`, and [src/transcription/revai.ts](../src/transcription/revai.ts) requests speaker-segmented output.
+
+**Cleanup interaction.** Speaker labels must survive the LLM pass. Check the shared-core preface ([src/shared-core.ts](../src/shared-core.ts)) and the default templates so they do not collapse or strip `Speaker X:` markers during cleanup. The Podcast default template ([src/settings/default-templates.ts](../src/settings/default-templates.ts)) is already written to tolerate both labeled and unlabeled input, so it is the natural first consumer; a meeting-notes variant could follow.
+
+**Honest assessment.** Opt-in and provider-limited by nature. Diarization quality varies (speaker count guesses, label churn mid-conversation, the usual homophone issues on proper nouns), so set expectations in the UI hint and pair it with item #3's long-form guide. Ship the string-embed version first; revisit structured segments only on demand.
+
 ---
 
 ## Done

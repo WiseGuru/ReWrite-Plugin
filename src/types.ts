@@ -98,6 +98,7 @@ export interface GlobalSettings {
 	mobileProfile: EnvironmentProfile;
 	defaultTemplateId: string;
 	lastUsedTemplateId: string;
+	quickRecordTemplateId: string;
 	recordingFormat: RecordingFormatPreference;
 	templatesFolderPath: string;
 	sharedCorePath: string;

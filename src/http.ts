@@ -43,6 +43,14 @@ function abortIfSignaled(signal: AbortSignal | undefined): void {
 	}
 }
 
+// Replaces any `?...` query portion in a string with `?<redacted>` so a request
+// URL surfacing inside an error message cannot leak query-string secrets (e.g. a
+// provider that authenticates via `?key=`). Stops at whitespace so only the URL's
+// query is masked, not the rest of the message.
+function redactQueryStrings(text: string): string {
+	return text.replace(/\?\S*/g, '?<redacted>');
+}
+
 export async function providerRequest(
 	init: ProviderRequestInit,
 ): Promise<RequestUrlResponse> {
@@ -57,7 +65,11 @@ export async function providerRequest(
 			throw: false,
 		});
 	} catch (e) {
-		const msg = e instanceof Error ? e.message : String(e);
+		const raw = e instanceof Error ? e.message : String(e);
+		// requestUrl's network-failure message can echo the full request URL, which
+		// for query-authenticated providers would carry the API key. Strip query
+		// strings defensively before the message reaches a Notice or the log.
+		const msg = redactQueryStrings(raw);
 		throw new ProviderError(init.provider, 0, msg, `${init.provider} request failed: ${msg}`);
 	}
 	abortIfSignaled(init.signal);
@@ -99,24 +111,6 @@ export async function jsonGet<T = unknown>(
 		signal,
 	});
 	return res.json as T;
-}
-
-export async function textPost(
-	provider: string,
-	url: string,
-	body: string | ArrayBuffer,
-	headers: Record<string, string> = {},
-	signal?: AbortSignal,
-): Promise<string> {
-	const res = await providerRequest({
-		provider,
-		url,
-		method: 'POST',
-		headers,
-		body,
-		signal,
-	});
-	return res.text;
 }
 
 export async function multipartPost(
