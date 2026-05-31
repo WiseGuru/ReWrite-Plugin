@@ -12,7 +12,7 @@ import {
 	TranscriptionProviderID,
 } from '../types';
 import { detectActiveProfileKind } from '../platform';
-import { createTranscriptionProvider } from '../transcription';
+import { createTranscriptionProvider, transcriptionProviderSupportsDiarization } from '../transcription';
 import { createLLMProvider } from '../llm';
 import { formatWhisperStatus } from '../whisper-host';
 import { populateDefaultTemplates } from '../templates-folder';
@@ -407,6 +407,19 @@ export class ReWriteSettingTab extends PluginSettingTab {
 						t.onChange(async (v) => {
 							if (this.plugin.encryptionStatus.locked) return;
 							profile.transcriptionConfig.apiKey = v;
+							await this.commit();
+						});
+					});
+			}
+
+			if (transcriptionProviderSupportsDiarization(profile.transcriptionProvider)) {
+				new Setting(body)
+					.setName('Identify speakers')
+					.setDesc('Tag each voice in the transcript with a speaker label and keep those labels through cleanup. Optional, and only this provider supports it. Quality varies: the speaker count is a guess and labels can drift mid-conversation.')
+					.addToggle((t) => {
+						t.setValue(profile.transcriptionConfig.diarize ?? false);
+						t.onChange(async (v) => {
+							profile.transcriptionConfig.diarize = v;
 							await this.commit();
 						});
 					});

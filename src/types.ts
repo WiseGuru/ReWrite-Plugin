@@ -22,6 +22,10 @@ export interface TranscriptionConfig {
 	baseUrl: string;
 	model: string;
 	language: string;
+	// Opt-in speaker diarization. Only honored by providers that support it
+	// (assemblyai, deepgram, revai); ignored by the rest. When on, the capable
+	// adapter embeds `Speaker X:` labels into the returned transcript string.
+	diarize?: boolean;
 }
 
 export interface LLMConfig {

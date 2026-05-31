@@ -46,6 +46,15 @@ export function createTranscriptionProvider(
 	}
 }
 
+// Providers that can return speaker-attributed transcripts. The settings tab
+// shows the "Identify speakers" toggle only for these; the rest ignore the
+// `diarize` flag entirely.
+export function transcriptionProviderSupportsDiarization(
+	id: TranscriptionProviderID,
+): boolean {
+	return id === 'assemblyai' || id === 'deepgram' || id === 'revai';
+}
+
 export function audioFilename(audio: Blob): string {
 	const type = (audio.type || '').toLowerCase();
 	if (type.includes('mp4')) return 'audio.mp4';

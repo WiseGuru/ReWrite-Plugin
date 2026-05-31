@@ -14,9 +14,15 @@ interface TranscriptCreateResponse {
 	id?: string;
 }
 
+interface Utterance {
+	speaker?: string;
+	text?: string;
+}
+
 interface TranscriptStatusResponse {
 	status?: 'queued' | 'processing' | 'completed' | 'error';
 	text?: string;
+	utterances?: Utterance[];
 	error?: string;
 }
 
@@ -49,6 +55,7 @@ export function createAssemblyAITranscription(): TranscriptionProvider {
 			const createBody: Record<string, unknown> = { audio_url: uploadUrl };
 			if (config.model) createBody.speech_models = [config.model];
 			if (config.language) createBody.language_code = config.language;
+			if (config.diarize) createBody.speaker_labels = true;
 			const created = await jsonPost<TranscriptCreateResponse>(
 				'assemblyai',
 				'https://api.assemblyai.com/v2/transcript',
@@ -60,14 +67,22 @@ export function createAssemblyAITranscription(): TranscriptionProvider {
 				throw new Error('assemblyai: transcript request missing id');
 			}
 
-			return pollAssemblyAI(created.id, authHeaders, signal);
+			return pollAssemblyAI(created.id, authHeaders, !!config.diarize, signal);
 		},
 	};
+}
+
+function formatUtterances(utterances: Utterance[]): string {
+	return utterances
+		.map((u) => `Speaker ${u.speaker ?? '?'}: ${(u.text ?? '').trim()}`)
+		.join('\n\n')
+		.trim();
 }
 
 async function pollAssemblyAI(
 	id: string,
 	headers: Record<string, string>,
+	diarize: boolean,
 	signal: AbortSignal | undefined,
 ): Promise<string> {
 	const start = Date.now();
@@ -84,6 +99,9 @@ async function pollAssemblyAI(
 			signal,
 		);
 		if (status.status === 'completed') {
+			if (diarize && Array.isArray(status.utterances) && status.utterances.length > 0) {
+				return formatUtterances(status.utterances);
+			}
 			if (typeof status.text !== 'string') {
 				throw new Error('assemblyai: completed response missing text');
 			}

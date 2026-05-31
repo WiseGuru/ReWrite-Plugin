@@ -15,7 +15,8 @@ You bring your own provider keys. Nothing is sent to a ReWrite server; the plugi
 - Quick Record command for one-shot capture with no modal: ribbon icon, command palette, or a custom hotkey.
 - Three insert modes: at the cursor, append to the active note, or create a new note with `{{date}}` / `{{time}}` filename templating. The modal's per-run Destination control overrides the template's mode, folder, and filename for a single run without editing the template.
 - **Process text with a template**: run any template over the current selection or whole note body, no audio needed, from the command palette or the editor right-click menu.
-- **Reprocess audio**: rerun the pipeline over an audio file already in your vault, from the command palette, the file-explorer right-click menu, or by placing the cursor inside an `![[audio]]` embed. Useful for retrying with a different template or provider.
+- **Reprocess audio**: rerun the pipeline over an audio file already in your vault, from the command palette, the file-explorer right-click menu, or by placing the cursor inside an `![[audio]]` embed. Useful for retrying with a different template or provider, and for long-form content like lectures and podcasts (see [Long-form audio](#long-form-audio-lectures-podcasts)).
+- **Speaker identification (diarization)**: opt-in `Speaker A:` / `Speaker B:` labels for multi-speaker recordings, preserved through cleanup. Available with AssemblyAI, Deepgram, and Rev.ai.
 - **Saved recordings**: each recording is written to your attachments folder and linked back into the output with an `![[...]]` embed, so the original audio stays in your vault.
 - **Ad-hoc voice instructions**: speak your assistant's name followed by an instruction mid-recording (e.g. "Scrivener, turn this into a checklist") and the directive is extracted and added to the cleanup prompt for that run only. The trigger word is configurable.
 - **Assistant prompt**: a vault Markdown file defines the persona and standing instructions prefaced to the cleanup step, so you can shape tone and behavior without touching settings.
@@ -148,6 +149,26 @@ If transcription quality drops noticeably (truncated sentences, missing trailing
 - **Process did not become ready within 5 s**: the model failed to load (file path wrong, file corrupted, RAM exhausted). The log tail will show whisper.cpp's error.
 - **`unknown argument: -ac` (or `--audio-context`) in the log**: your `whisper-server` build predates the dynamic audio-context flag. Update to a current whisper.cpp release, or remove the `-ac` value from Extra args (you can still use the FUTO model files without the flag, you just lose the latency benefit).
 - **FUTO model loads but transcripts are truncated or jumbled**: `-ac` is set too low for the length of audio you are dictating. Raise it (e.g. `768` to `1024` to `1500`) until the output is stable.
+
+## Long-form audio (lectures, podcasts)
+
+ReWrite is not just for quick voice memos. The same pipeline cleans up and structures long recordings such as lectures, meetings, interviews, and podcasts. Nothing special is required: you process a long file the same way you reprocess any audio already in your vault.
+
+### Workflow
+
+1. **Get the audio file.** A mic recording you made, an export from a meeting tool (Zoom, Teams, Meet), a ripped CD, or any audio file you already have. For YouTube specifically, a third-party downloader such as [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) can extract the audio track. **Make sure you have the right to the audio first**: downloading YouTube content without permission violates YouTube's Terms of Service and may infringe copyright. Only process audio you are allowed to.
+2. **Drop the file into your vault** anywhere (for example an `Attachments` or `Recordings` folder).
+3. **Reprocess it.** Right-click the file in the file explorer and choose **"Reprocess audio with template..."**. The same action is available from the command palette (**"Reprocess audio file with template"**) and from the editor menu when your cursor sits inside an `![[audio]]` embed.
+4. **Pick a template.** **Lecture** restructures a single-speaker talk into Summary / Key concepts / Definitions / Examples / Open questions / References. **Podcast** produces Summary / Speakers / Topics discussed / Notable quotes / References / Takeaways.
+5. **Choose a destination** if the template's default folder is wrong (the modal's Destination control isn't on the reprocess path, so set the folder/filename on the template itself, or move the note afterward).
+
+### Duration and size caps
+
+Very long recordings can exceed a provider's limits. The per-provider byte and duration ceilings live in [src/transcription/limits.ts](src/transcription/limits.ts). For multi-hour content, prefer **AssemblyAI** (up to 10 h) or **Rev.ai** (up to 17 h); OpenAI Whisper and Groq cap at 25 MB, and Mistral Voxtral at 30 minutes.
+
+### Speaker labels (diarization)
+
+For podcasts, meetings, and interviews, you can turn on **Identify speakers** in the transcription section of your profile settings. When enabled, the transcript comes back with `Speaker A:` / `Speaker B:` (or `Speaker 1:` / `Speaker 2:`) prefixes, and the cleanup step preserves them. This works **only** with **AssemblyAI**, **Deepgram**, and **Rev.ai**; the toggle is hidden for providers that cannot diarize (OpenAI Whisper, Groq, Mistral Voxtral, local whisper.cpp). Diarization quality varies: the speaker count is a guess and labels can drift mid-conversation. The Podcast template handles both labeled and unlabeled transcripts, so it works either way.
 
 ## Excluding `secrets.json.nosync` from sync
 

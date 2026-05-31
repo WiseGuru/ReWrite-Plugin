@@ -16,6 +16,19 @@ interface JobStatusResponse {
 	failure?: string;
 }
 
+interface RevAiTranscriptElement {
+	value?: string;
+}
+
+interface RevAiMonologue {
+	speaker?: number;
+	elements?: RevAiTranscriptElement[];
+}
+
+interface RevAiTranscriptJson {
+	monologues?: RevAiMonologue[];
+}
+
 export function createRevAITranscription(): TranscriptionProvider {
 	return {
 		id: 'revai',
@@ -58,6 +71,21 @@ export function createRevAITranscription(): TranscriptionProvider {
 
 			await pollRevAI(created.id, authHeaders, signal);
 
+			// Rev.ai diarizes by default. The plain-text transcript flattens that
+			// away, so when diarization is requested we fetch the JSON transcript
+			// and rebuild speaker-labeled text from its monologues.
+			if (config.diarize) {
+				const json = await providerRequest({
+					provider: 'revai',
+					url: `https://api.rev.ai/speechtotext/v1/jobs/${created.id}/transcript`,
+					method: 'GET',
+					headers: { ...authHeaders, Accept: 'application/vnd.rev.transcript.v1.0+json' },
+					signal,
+				});
+				const labeled = formatMonologues(json.json as RevAiTranscriptJson);
+				if (labeled) return labeled;
+			}
+
 			const transcript = await providerRequest({
 				provider: 'revai',
 				url: `https://api.rev.ai/speechtotext/v1/jobs/${created.id}/transcript`,
@@ -68,6 +96,20 @@ export function createRevAITranscription(): TranscriptionProvider {
 			return transcript.text.trim();
 		},
 	};
+}
+
+// Rebuilds speaker-labeled text from Rev.ai's JSON transcript. Each monologue's
+// elements (text and punctuation) concatenate back into the spoken text; the
+// 0-based speaker index is bumped to 1-based so labels never read "Speaker 0".
+function formatMonologues(json: RevAiTranscriptJson): string {
+	const monologues = json.monologues ?? [];
+	return monologues
+		.map((m) => {
+			const text = (m.elements ?? []).map((e) => e.value ?? '').join('').trim();
+			return `Speaker ${(m.speaker ?? 0) + 1}: ${text}`;
+		})
+		.join('\n\n')
+		.trim();
 }
 
 async function pollRevAI(

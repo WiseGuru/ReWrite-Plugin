@@ -21,36 +21,17 @@ Voxtral exposes a real-time STT model that doesn't accept whole-file uploads, an
 - Provider-side gating: only enable for transcription providers that expose a realtime endpoint; document which.
 - Honest assessment: this is lower-value than the rest of the plugin (transcript with no cleanup is what Obsidian's existing voice plugins already do). Ship only if users ask.
 
-### 3. Long-form audio workflow: lectures and podcasts (docs guide)
-
-Demo-shaped feature, not a code feature. The user already has every primitive: drop an audio file into the vault, run "Reprocess audio file with template", pick a template tuned for the content. The Lecture and Podcast default templates shipped (see Done); the remaining work is the guide.
-
-Remaining scope (the Guide):
-
-Add a "Long-form audio (lectures, podcasts)" section to the README (or a `docs/LONG_FORM_AUDIO.md`) that walks through: getting an audio file (mic recording, exported from a meeting tool, ripped from a CD, or, for YouTube specifically, a third-party downloader like `yt-dlp` with a clear caveat that downloading YouTube content without permission violates YouTube's Terms of Service and may infringe copyright, so users must confirm they have the right to the audio before processing); dropping the file into the vault; right-clicking it in the file explorer and choosing "Reprocess audio with template..."; picking Lecture or Podcast; choosing a destination override if the default folder is wrong. Mention that very long files may hit per-provider duration caps (see [src/transcription/limits.ts](../src/transcription/limits.ts)) and recommend AssemblyAI or Rev.ai for multi-hour content. For podcasts specifically, note that speaker labels in the transcript depend on the transcription provider supporting diarization (AssemblyAI, Deepgram, Rev.ai do; OpenAI Whisper, Groq, Mistral Voxtral, local whisper.cpp do not), and the Podcast template prompt is written to handle both cases.
-
-If a hosted-YouTube-fetch feature is ever requested later, the shell-out-to-`yt-dlp` adapter is still the right shape (desktop only, user-supplied binary path, mirrors the local-whisper.cpp pattern), but ship that only on demand.
-
-### 4. Speaker identification (diarization) for recorded/long-form audio
-
-Opt-in mode where the transcription provider returns speaker-attributed text (e.g. `Speaker A: ...` / `Speaker B: ...`) and the attribution is preserved through cleanup into the inserted note. Natural fit for meetings, interviews, and multi-host podcasts. Item #3 already documents the provider support matrix as a transcript caveat; this item promotes it into a tracked, opt-in feature.
-
-**Provider gating.** Enable only for providers that expose diarization: AssemblyAI (`speaker_labels: true`, returns an `utterances[]` array), Deepgram (`diarize=true`), and Rev.ai. Disabled/hidden for OpenAI Whisper, Groq, Mistral Voxtral, and local whisper.cpp (no diarization). Gate the toggle the same way the `whisper-local` option is platform-gated in [src/settings/tab.ts](../src/settings/tab.ts) and [src/ui/setup-card.ts](../src/ui/setup-card.ts): show it only when the active profile's transcription provider supports diarization.
-
-**Interface decision (load-bearing).** `TranscriptionProvider.transcribe()` returns `Promise<string>` today ([src/transcription/index.ts](../src/transcription/index.ts) lines 12-16). Two options:
-
-1. **Embed labels into the returned string** (`Speaker A: ...\n\nSpeaker B: ...`) inside each capable adapter, leaving the interface and the rest of the pipeline untouched; the LLM cleanup treats the labels as ordinary text. Lowest-risk, ships fastest. **Recommended as the v1 shape.**
-2. Extend the return type to carry structured segments (`{ speaker, text }[]`). Only worth it if a later feature needs the structure (per-speaker callouts, styling). Defer until something asks for it.
-
-**Config + settings.** Add a per-profile opt-in flag (e.g. `TranscriptionConfig.diarize?: boolean` in [src/types.ts](../src/types.ts), alongside `apiKey`/`baseUrl`/`model`/`language`), surfaced as a toggle in the per-profile transcription section of the settings tab, shown only for diarization-capable providers. Each capable adapter reads the flag and sets the provider-specific request parameter: [src/transcription/assemblyai.ts](../src/transcription/assemblyai.ts) additionally has to request `speaker_labels` and format the returned `utterances[]` into labeled text (it currently reads the flat `text` field), [src/transcription/deepgram.ts](../src/transcription/deepgram.ts) sets `diarize`, and [src/transcription/revai.ts](../src/transcription/revai.ts) requests speaker-segmented output.
-
-**Cleanup interaction.** Speaker labels must survive the LLM pass. Check the shared-core preface ([src/shared-core.ts](../src/shared-core.ts)) and the default templates so they do not collapse or strip `Speaker X:` markers during cleanup. The Podcast default template ([src/settings/default-templates.ts](../src/settings/default-templates.ts)) is already written to tolerate both labeled and unlabeled input, so it is the natural first consumer; a meeting-notes variant could follow.
-
-**Honest assessment.** Opt-in and provider-limited by nature. Diarization quality varies (speaker count guesses, label churn mid-conversation, the usual homophone issues on proper nouns), so set expectations in the UI hint and pair it with item #3's long-form guide. Ship the string-embed version first; revisit structured segments only on demand.
-
 ---
 
 ## Done
+
+### Speaker identification (diarization) for recorded/long-form audio
+
+Shipped the opt-in, string-embed v1 shape (option 1 from the former item #4). New optional `TranscriptionConfig.diarize?: boolean` ([src/types.ts](../src/types.ts)); capability centralized in `transcriptionProviderSupportsDiarization(id)` ([src/transcription/index.ts](../src/transcription/index.ts)), true only for `assemblyai` / `deepgram` / `revai`. The settings tab ([src/settings/tab.ts](../src/settings/tab.ts)) renders an "Identify speakers" toggle in the per-profile transcription block, gated on that helper (setup card left untouched). Each capable adapter embeds `Speaker X:` labels into the returned transcript string, leaving the `transcribe(): Promise<string>` interface and the pipeline unchanged: AssemblyAI sets `speaker_labels: true` and formats `utterances[]` (native letter labels); Deepgram adds `diarize=true` and groups per-word `speaker` indices via `formatDiarizedWords` (0-based bumped to `Speaker 1`); Rev.ai fetches the JSON transcript (`Accept: application/vnd.rev.transcript.v1.0+json`) and rebuilds labels from `monologues[]` via `formatMonologues` (0-based bumped to `Speaker 1`). Each adapter falls back to flat text when the labeled payload is missing, so toggling off is a clean no-op. Label survival is handled by a clause added to `DEFAULT_SHARED_CORE` ([src/shared-core.ts](../src/shared-core.ts)); the Podcast default template already tolerated both cases. Decision: keep provider-native labels (letters for AssemblyAI, 1-based integers for Deepgram/Rev.ai) rather than normalizing. Structured `{ speaker, text }[]` segments deferred until a consumer needs them.
+
+### Long-form audio workflow: lectures and podcasts (docs guide)
+
+Pure documentation; all primitives already shipped (reprocess-audio command + file/editor menu entries, Lecture/Podcast templates). Added an inline `## Long-form audio (lectures, podcasts)` section to [README.md](../README.md) walking through: getting an audio file (mic, meeting-tool export, ripped CD, or `yt-dlp` for YouTube with the ToS/copyright caveat that the user must confirm they have the right to the audio); dropping it in the vault; reprocessing via the file-explorer menu / command / `![[audio]]` embed; picking Lecture or Podcast; per-provider duration caps (recommend AssemblyAI/Rev.ai for multi-hour); and the new speaker-identification toggle (AssemblyAI / Deepgram / Rev.ai only). Added matching Features bullets. The hosted `yt-dlp` shell-out adapter remains deferred until demanded.
 
 ### Secrets encryption: dropped plaintext, hardened passphrase mode (verified keychain + entropy gate + Argon2id)
 
