@@ -20,7 +20,7 @@ const EMPTY_LLM_CONFIG: LLMConfig = {
 	apiKey: '',
 	baseUrl: '',
 	model: '',
-	maxTokens: 2048,
+	maxTokens: 2560,
 };
 
 const DESKTOP_DEFAULT_PROFILE: EnvironmentProfile = {

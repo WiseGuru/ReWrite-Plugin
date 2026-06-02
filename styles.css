@@ -200,6 +200,19 @@
 	margin-left: -15px;
 }
 
+/* Give "Maximum note length" first-class emphasis vs the plainer fields around it. */
+.rewrite-settings .rewrite-note-length {
+	margin-top: 8px;
+	padding: 6px 12px;
+	border-left: 3px solid var(--interactive-accent);
+	background-color: var(--background-secondary);
+	border-radius: 4px;
+}
+
+.rewrite-settings .rewrite-note-length .setting-item-name {
+	font-weight: var(--font-semibold, 600);
+}
+
 .rewrite-settings .rewrite-profile-active-badge {
 	display: inline-block;
 	background-color: var(--interactive-accent);

@@ -27,6 +27,19 @@ import { PassphraseModal } from '../ui/passphrase-modal';
 // Sentinel value for the "Custom..." entry in a model dropdown; never written to config.model.
 const CUSTOM_MODEL_OPTION = '__rewrite_custom__';
 
+// Cleanup output runs ~256 tokens per minute of speech (≈150 wpm × ~1.3 tokens/word,
+// padded ~20% for headings, bullets, and Speaker labels in structured/diarized notes).
+// The "Maximum note length" dropdown maps these minute presets onto config.maxTokens;
+// the raw token count is editable in Advanced. ~10 min → 2560 is the default.
+const TOKENS_PER_MIN = 256;
+const NOTE_LENGTH_PRESETS: Array<{ minutes: number; tokens: number }> = [
+	{ minutes: 5, tokens: 1280 },
+	{ minutes: 10, tokens: 2560 },
+	{ minutes: 20, tokens: 5120 },
+	{ minutes: 30, tokens: 7680 },
+	{ minutes: 60, tokens: 15360 },
+];
+
 const TRANSCRIPTION_OPTIONS: Array<{ id: TranscriptionProviderID; label: string; desktopOnly?: boolean }> = [
 	{ id: 'openai', label: 'OpenAI Whisper' },
 	{ id: 'openai-compatible', label: 'OpenAI-compatible (local server)' },
@@ -468,9 +481,46 @@ export class ReWriteSettingTab extends PluginSettingTab {
 						await this.commit();
 					});
 				});
+
+			this.renderNoteLength(body, profile);
 		}
 
 		this.renderProfileAdvanced(body, profile);
+	}
+
+	// Normal-area control for cleanup output length, framed in minutes rather than raw
+	// tokens. Presets map onto config.maxTokens (the single source of truth); a non-preset
+	// value (set via the Advanced "LLM max tokens" field) surfaces as a "Custom (...)" option.
+	private renderNoteLength(parent: HTMLElement, profile: EnvironmentProfile): void {
+		const current = profile.llmConfig.maxTokens;
+		const matched = NOTE_LENGTH_PRESETS.some((p) => p.tokens === current);
+
+		const setting = new Setting(parent)
+			.setName('Maximum note length')
+			.setDesc(
+				'How long a recording the cleaned note can hold before the response is cut off. ' +
+					'Roughly 10 min of speech ≈ 2,560 tokens; structured or multi-speaker notes run longer. ' +
+					'For an exact token count, use LLM max tokens under Advanced.',
+			)
+			.addDropdown((d) => {
+				for (const p of NOTE_LENGTH_PRESETS) {
+					d.addOption(String(p.tokens), `~${p.minutes} min (${p.tokens.toLocaleString()} tokens)`);
+				}
+				if (!matched) {
+					const mins = Math.max(1, Math.round(current / TOKENS_PER_MIN));
+					d.addOption(String(current), `Custom (${current.toLocaleString()} tokens, ~${mins} min)`);
+				}
+				d.setValue(String(current));
+				d.onChange(async (v) => {
+					const n = Number.parseInt(v, 10);
+					if (!Number.isFinite(n) || n <= 0) return;
+					profile.llmConfig.maxTokens = n;
+					await this.commit();
+					// Re-render so the Advanced raw-token field reflects the new value.
+					this.display();
+				});
+			});
+		setting.settingEl.addClass('rewrite-note-length');
 	}
 
 	private renderProfileAdvanced(parent: HTMLElement, profile: EnvironmentProfile): void {
@@ -495,13 +545,16 @@ export class ReWriteSettingTab extends PluginSettingTab {
 		if (profile.llmProvider !== 'none') {
 			new Setting(details)
 				.setName('LLM max tokens')
-				.setDesc('Maximum tokens for the cleanup response. Default 2048.')
+				.setDesc(
+					'Exact token cap for the cleanup response, overriding the Maximum note length presets. ' +
+						'~256 tokens ≈ 1 min of cleaned speech. Default 2560.',
+				)
 				.addText((t) => {
 					t.inputEl.type = 'number';
 					t.setValue(String(profile.llmConfig.maxTokens));
 					t.onChange(async (v) => {
 						const n = Number.parseInt(v, 10);
-						profile.llmConfig.maxTokens = Number.isFinite(n) && n > 0 ? n : 2048;
+						profile.llmConfig.maxTokens = Number.isFinite(n) && n > 0 ? n : 2560;
 						await this.commit();
 					});
 				});

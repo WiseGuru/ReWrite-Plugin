@@ -29,7 +29,7 @@ export function createAnthropicLLM(): LLMProvider {
 			if (!config.model) throw new Error('anthropic: model is not configured');
 			const body = {
 				model: config.model,
-				max_tokens: config.maxTokens > 0 ? config.maxTokens : 2048,
+				max_tokens: config.maxTokens > 0 ? config.maxTokens : 2560,
 				system: systemPrompt,
 				messages: [{ role: 'user', content: userMessage }],
 			};
