@@ -68,6 +68,18 @@ Goals, Tasks, and Calendar are extracted from what the speaker actually said in 
 		insertMode: 'newFile',
 		newFileFolder: 'Meetings',
 		newFileNameTemplate: 'Meeting {{date}} {{time}}',
+		enableContextHint: true,
+	},
+	{
+		id: 'tpl-default-meeting-transcript',
+		name: 'Meeting transcript',
+		prompt:
+			`Restructure the transcript into meeting notes using these "##" sections, omitting any the transcript doesn't cover: Attendees, Summary, Action items, Decisions. The transcript includes "Speaker X:" labels; use them to populate Attendees and to attribute action items and decisions to the right person, replacing the generic labels with real names when the context makes them clear. Format Action items as a Markdown checkbox list ("- [ ] "), naming the owner when one is identifiable. Keep Summary to 2-4 sentences. Do not invent attendees, actions, or decisions.`,
+		insertMode: 'newFile',
+		newFileFolder: 'Meetings',
+		newFileNameTemplate: 'Meeting {{date}} {{time}}',
+		enableContextHint: true,
+		diarize: true,
 	},
 	{
 		id: 'tpl-default-idea-capture',
@@ -86,6 +98,7 @@ Goals, Tasks, and Calendar are extracted from what the speaker actually said in 
 		insertMode: 'newFile',
 		newFileFolder: 'Lectures',
 		newFileNameTemplate: 'Lecture {{date}} {{time}}',
+		enableContextHint: true,
 	},
 	{
 		id: 'tpl-default-podcast',
@@ -95,6 +108,7 @@ Goals, Tasks, and Calendar are extracted from what the speaker actually said in 
 		insertMode: 'newFile',
 		newFileFolder: 'Podcasts',
 		newFileNameTemplate: 'Podcast {{date}} {{time}}',
+		enableContextHint: true,
 	},
 ];
 

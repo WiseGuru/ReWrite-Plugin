@@ -44,6 +44,34 @@
 	width: 100%;
 }
 
+.rewrite-modal .rewrite-context-row {
+	margin-bottom: 12px;
+	padding: 8px;
+	border: 1px dashed var(--background-modifier-border);
+	border-radius: 4px;
+}
+
+.rewrite-modal .rewrite-context-summary {
+	cursor: pointer;
+	user-select: none;
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+}
+
+.rewrite-modal .rewrite-context-summary-value {
+	color: var(--text-normal);
+}
+
+.rewrite-modal .rewrite-context-body {
+	margin-top: 8px;
+}
+
+.rewrite-modal .rewrite-context-input {
+	width: 100%;
+	font-family: var(--font-text);
+	resize: vertical;
+}
+
 .rewrite-modal .rewrite-destination-reset {
 	align-self: flex-start;
 	font-size: var(--font-ui-small);

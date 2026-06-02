@@ -1,4 +1,4 @@
-import { App, Modal } from 'obsidian';
+import { App, Modal, Platform } from 'obsidian';
 import { NoteTemplate } from '../types';
 
 export interface TemplatePickerParams {
@@ -6,10 +6,16 @@ export interface TemplatePickerParams {
 	templates: NoteTemplate[];
 	defaultTemplateId: string;
 	previewText: string;
-	onPick: (template: NoteTemplate) => void;
+	// When true, surface an optional collapsed "Context" field above the list.
+	// The trimmed value is handed to onPick; the caller decides whether to honor
+	// it (e.g. only when the picked template has `enableContextHint`).
+	showContext?: boolean;
+	onPick: (template: NoteTemplate, contextHint: string) => void;
 }
 
 export class TemplatePickerModal extends Modal {
+	private contextHint = '';
+
 	constructor(private readonly params: TemplatePickerParams) {
 		super(params.app);
 	}
@@ -30,6 +36,8 @@ export class TemplatePickerModal extends Modal {
 			return;
 		}
 
+		if (this.params.showContext) this.renderContext(contentEl);
+
 		const list = contentEl.createDiv({ cls: 'rewrite-template-picker-list' });
 		for (const template of this.params.templates) {
 			const item = list.createEl('button', {
@@ -39,9 +47,24 @@ export class TemplatePickerModal extends Modal {
 			if (template.id === this.params.defaultTemplateId) item.addClass('mod-cta');
 			item.addEventListener('click', () => {
 				this.close();
-				this.params.onPick(template);
+				this.params.onPick(template, this.contextHint.trim());
 			});
 		}
+	}
+
+	private renderContext(parent: HTMLElement): void {
+		const details = parent.createEl('details', { cls: 'rewrite-context-row' });
+		const summary = details.createEl('summary', { cls: 'rewrite-context-summary' });
+		summary.createSpan({ cls: 'rewrite-context-summary-label', text: 'Context: ' });
+		summary.createSpan({ cls: 'rewrite-context-summary-value', text: 'None (optional)' });
+
+		const body = details.createDiv({ cls: 'rewrite-context-body' });
+		const textarea = body.createEl('textarea', { cls: 'rewrite-context-input' });
+		textarea.rows = Platform.isMobile ? 2 : 3;
+		textarea.placeholder = 'Who is speaking and what this recording is (for example a lecture by one professor, or a meeting with several teammates)';
+		textarea.addEventListener('input', () => {
+			this.contextHint = textarea.value;
+		});
 	}
 
 	onClose(): void {

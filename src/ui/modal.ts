@@ -16,6 +16,8 @@ export class ReWriteModal extends Modal {
 	private currentSource: PipelineSource | null = null;
 	private destinationOverride: DestinationOverride | null = null;
 	private destinationExpanded = false;
+	private contextHint = '';
+	private contextExpanded = false;
 
 	constructor(
 		app: App,
@@ -70,6 +72,7 @@ export class ReWriteModal extends Modal {
 
 		this.renderTemplateSelector(contentEl);
 		this.renderDestinationSelector(contentEl);
+		this.renderContextSelector(contentEl);
 		this.renderTabBar(contentEl);
 		const tabBody = contentEl.createDiv({ cls: 'rewrite-tab-body' });
 
@@ -162,6 +165,8 @@ export class ReWriteModal extends Modal {
 			this.templateId = select.value;
 			this.destinationOverride = null;
 			this.destinationExpanded = false;
+			this.contextHint = '';
+			this.contextExpanded = false;
 			this.render();
 		});
 	}
@@ -251,6 +256,33 @@ export class ReWriteModal extends Modal {
 			newFileFolder: patch.newFileFolder ?? current.newFileFolder,
 			newFileNameTemplate: patch.newFileNameTemplate ?? current.newFileNameTemplate,
 		};
+	}
+
+	private renderContextSelector(parent: HTMLElement): void {
+		const template = this.activeTemplate();
+		if (!template?.enableContextHint) return;
+
+		const details = parent.createEl('details', { cls: 'rewrite-context-row' });
+		details.open = this.contextExpanded;
+		details.addEventListener('toggle', () => {
+			this.contextExpanded = details.open;
+		});
+
+		const summary = details.createEl('summary', { cls: 'rewrite-context-summary' });
+		summary.createSpan({ cls: 'rewrite-context-summary-label', text: 'Context: ' });
+		summary.createSpan({
+			cls: 'rewrite-context-summary-value',
+			text: this.contextHint.trim() ? 'Set' : 'None (optional)',
+		});
+
+		const body = details.createDiv({ cls: 'rewrite-context-body' });
+		const textarea = body.createEl('textarea', { cls: 'rewrite-context-input' });
+		textarea.rows = Platform.isMobile ? 2 : 3;
+		textarea.placeholder = 'Who is speaking and what this recording is (for example a lecture by one professor, or a meeting with several teammates)';
+		textarea.value = this.contextHint;
+		textarea.addEventListener('input', () => {
+			this.contextHint = textarea.value;
+		});
 	}
 
 	private renderTabBar(parent: HTMLElement): void {
@@ -427,6 +459,7 @@ export class ReWriteModal extends Modal {
 				template,
 				source,
 				destinationOverride: this.destinationOverride ?? undefined,
+				contextHint: this.contextHint.trim() || undefined,
 				onStage: (stage) => progress.setText(stageLabel(stage)),
 			});
 			this.plugin.settings.lastUsedTemplateId = template.id;

@@ -375,8 +375,9 @@ export default class ReWritePlugin extends Plugin implements PipelineHost {
 			templates: this.templates,
 			defaultTemplateId: this.pickDefaultTemplateId(),
 			previewText: `Audio: ${file.path}`,
-			onPick: (template) => {
-				void runAudioFilePipeline(this, template, file);
+			showContext: this.templates.some((t) => t.enableContextHint),
+			onPick: (template, contextHint) => {
+				void runAudioFilePipeline(this, template, file, template.enableContextHint ? contextHint : undefined);
 			},
 		}).open();
 	}

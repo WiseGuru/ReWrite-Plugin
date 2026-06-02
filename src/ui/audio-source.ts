@@ -27,6 +27,7 @@ export async function runAudioFilePipeline(
 	plugin: ReWritePlugin,
 	template: NoteTemplate,
 	file: TFile,
+	contextHint?: string,
 ): Promise<void> {
 	const settings = plugin.settings;
 	const { profile } = resolveActiveProfile(settings);
@@ -54,6 +55,7 @@ export async function runAudioFilePipeline(
 			profile,
 			template,
 			source: { kind: 'audio', audio: blob, sourcePath: file.path },
+			contextHint: contextHint?.trim() || undefined,
 		});
 		progress.hide();
 		plugin.settings.lastUsedTemplateId = template.id;

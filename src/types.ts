@@ -47,6 +47,16 @@ export interface NoteTemplate {
 	// When true, the shared core preface is NOT prepended to this template's
 	// prompt. Absent/false means the shared core is used (when one is loaded).
 	disableSharedCore?: boolean;
+	// When true, the modal / reprocess picker surfaces an optional free-text
+	// "Context" field for this template (speakers, setting, subject). Opt-in:
+	// absent/false means the field is hidden. NOTE the polarity is the reverse
+	// of disableSharedCore (positive opt-in, not negative opt-out).
+	enableContextHint?: boolean;
+	// When true, forces speaker diarization on for this template's transcription,
+	// regardless of the profile's "Identify speakers" toggle. Only effective on
+	// diarization-capable providers (assemblyai/deepgram/revai); a no-op on the
+	// rest. Absent/false means the profile setting governs.
+	diarize?: boolean;
 }
 
 export interface DestinationOverride {

@@ -94,6 +94,18 @@ async function parseTemplateFile(app: App, file: TFile): Promise<NoteTemplate | 
 	const disableSharedCore = rawDisable === true
 		|| (typeof rawDisable === 'string' && rawDisable.trim().toLowerCase() === 'true');
 
+	// Same tolerance as disableSharedCore (boolean true or string "true"); this
+	// flag is a positive opt-in, so anything else / absent means not enabled.
+	const rawContext = obj.enableContextHint;
+	const enableContextHint = rawContext === true
+		|| (typeof rawContext === 'string' && rawContext.trim().toLowerCase() === 'true');
+
+	// Forces diarization on for this template (capable providers only); same
+	// boolean/string tolerance as the other flags.
+	const rawDiarize = obj.diarize;
+	const diarize = rawDiarize === true
+		|| (typeof rawDiarize === 'string' && rawDiarize.trim().toLowerCase() === 'true');
+
 	return {
 		id,
 		name,
@@ -102,6 +114,8 @@ async function parseTemplateFile(app: App, file: TFile): Promise<NoteTemplate | 
 		newFileFolder,
 		newFileNameTemplate,
 		disableSharedCore,
+		enableContextHint,
+		diarize,
 	};
 }
 
@@ -164,7 +178,15 @@ function renderTemplateFile(template: NoteTemplate): string {
 	const disableLine = template.disableSharedCore
 		? 'disableSharedCore: true'
 		: 'disableSharedCore:';
-	return `---\n${fm}\n${disableLine}\n---\n${template.prompt}\n`;
+	// Same discoverability treatment for the opt-in context-hint knob.
+	const contextLine = template.enableContextHint
+		? 'enableContextHint: true'
+		: 'enableContextHint:';
+	// And for the opt-in diarization knob.
+	const diarizeLine = template.diarize
+		? 'diarize: true'
+		: 'diarize:';
+	return `---\n${fm}\n${disableLine}\n${contextLine}\n${diarizeLine}\n---\n${template.prompt}\n`;
 }
 
 function sanitizeFilename(name: string): string {
