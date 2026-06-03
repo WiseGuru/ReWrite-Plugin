@@ -28,6 +28,20 @@ const SILENCE_LEVEL_THRESHOLD = 0.015;
 // How often the level monitor samples the analyser while recording.
 const LEVEL_SAMPLE_INTERVAL_MS = 100;
 
+// navigator.wakeLock is not present in every TypeScript DOM lib version (and not in
+// every WebView), so we declare the narrow slice we use and access it via a cast.
+interface WakeLockSentinelLike {
+	readonly released: boolean;
+	release(): Promise<void>;
+	addEventListener(type: 'release', listener: () => void): void;
+}
+interface WakeLockLike {
+	request(type: 'screen'): Promise<WakeLockSentinelLike>;
+}
+function getWakeLock(): WakeLockLike | undefined {
+	return (navigator as unknown as { wakeLock?: WakeLockLike }).wakeLock;
+}
+
 export function getBestMimeType(preference: RecordingFormatPreference): string {
 	if (typeof MediaRecorder === 'undefined') return '';
 	const candidates = preference === 'mp4' ? MP4_FIRST : WEBM_FIRST;
@@ -55,6 +69,11 @@ export class Recorder {
 	private currentLevel = 0;
 	private lastSoundAt = 0;
 	private soundDetected = false;
+
+	// Screen wake lock: holds the device awake while recording so Android (and iOS) do
+	// not suspend the WebView when the screen would otherwise sleep, which kills capture.
+	private wakeLock: WakeLockSentinelLike | null = null;
+	private visibilityHandler: (() => void) | null = null;
 
 	getState(): RecorderState {
 		return this.state;
@@ -118,6 +137,7 @@ export class Recorder {
 		this.accumulatedMs = 0;
 		this.state = 'recording';
 		this.startLevelMonitor(stream);
+		this.startWakeLock();
 		recorder.start();
 	}
 
@@ -129,6 +149,8 @@ export class Recorder {
 		this.accumulatedMs += Date.now() - this.startedAt;
 		this.mediaRecorder.pause();
 		this.state = 'paused';
+		// Paused recording can't lose data, so let the screen sleep until resume.
+		this.releaseWakeLock();
 	}
 
 	resume(): void {
@@ -141,6 +163,7 @@ export class Recorder {
 		// Don't count the paused gap as silence.
 		this.lastSoundAt = Date.now();
 		this.state = 'recording';
+		void this.acquireWakeLock();
 	}
 
 	async stop(): Promise<RecorderResult> {
@@ -183,9 +206,65 @@ export class Recorder {
 
 	private releaseStream(): void {
 		this.stopLevelMonitor();
+		this.stopWakeLock();
 		if (this.stream) {
 			for (const track of this.stream.getTracks()) track.stop();
 			this.stream = null;
+		}
+	}
+
+	/**
+	 * Begin holding a screen wake lock and register the visibility listener that
+	 * re-acquires it. The OS auto-releases a screen wake lock whenever the document
+	 * becomes hidden, so we re-request on the next 'visible' transition while still
+	 * recording. Best-effort: where the Wake Lock API is missing (older WebView,
+	 * desktop builds, insecure context) recording proceeds without it.
+	 */
+	private startWakeLock(): void {
+		void this.acquireWakeLock();
+		if (this.visibilityHandler) return;
+		this.visibilityHandler = () => {
+			if (document.visibilityState === 'visible' && this.state === 'recording' && !this.wakeLock) {
+				void this.acquireWakeLock();
+			}
+		};
+		document.addEventListener('visibilitychange', this.visibilityHandler);
+	}
+
+	private async acquireWakeLock(): Promise<void> {
+		const wl = getWakeLock();
+		if (!wl) return;
+		if (this.wakeLock && !this.wakeLock.released) return;
+		try {
+			const sentinel = await wl.request('screen');
+			sentinel.addEventListener('release', () => {
+				if (this.wakeLock === sentinel) this.wakeLock = null;
+			});
+			// A stop/cancel may have raced ahead of this async request; if so, drop it.
+			if (this.state === 'recording') {
+				this.wakeLock = sentinel;
+			} else {
+				void sentinel.release().catch(() => { /* best effort */ });
+			}
+		} catch {
+			// NotAllowedError (denied / not user-active / insecure context): proceed without.
+			this.wakeLock = null;
+		}
+	}
+
+	private releaseWakeLock(): void {
+		const sentinel = this.wakeLock;
+		this.wakeLock = null;
+		if (sentinel && !sentinel.released) {
+			void sentinel.release().catch(() => { /* best effort */ });
+		}
+	}
+
+	private stopWakeLock(): void {
+		this.releaseWakeLock();
+		if (this.visibilityHandler) {
+			document.removeEventListener('visibilitychange', this.visibilityHandler);
+			this.visibilityHandler = null;
 		}
 	}
 
