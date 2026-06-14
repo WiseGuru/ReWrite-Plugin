@@ -8,7 +8,7 @@ You bring your own provider keys. Nothing is sent to a ReWrite server; the plugi
 
 - Record audio directly in Obsidian, or paste a pre-existing transcript.
 - 8 transcription providers: OpenAI Whisper, OpenAI-compatible (whisper.cpp, faster-whisper-server, etc.), Groq, AssemblyAI, Deepgram, Rev.ai, Mistral Voxtral, and a plugin-managed local whisper.cpp server (desktop).
-- 5 LLM providers for cleanup: Anthropic Claude, OpenAI GPT, OpenAI-compatible (Ollama, LM Studio), Google Gemini, Mistral.
+- 5 LLM providers for cleanup: Anthropic Claude, OpenAI GPT, OpenAI-compatible (Ollama, LM Studio, plus cloud services like DeepSeek, Kimi, Qwen, GLM), Google Gemini, Mistral.
 - Desktop and Mobile profiles, auto-selected by environment with a manual override.
 - 7 starter templates (General cleanup, Todo list, Daily note, Meeting notes, Idea capture, Lecture, Podcast), stored as editable Markdown files in your vault and ordered by filename (prefix with `01-`, `02-`, etc. to reorder).
 - **Shared core**: a single vault Markdown file (`ReWrite/SharedCore.md`) holds the cleanup ground rules (don't act on the transcript, fix grammar/fillers, output only the result) that prefix every template, so you edit the baseline once. Trim it to save tokens, set `disableSharedCore: true` in a template's frontmatter to skip it there, or delete the file to turn it off entirely.
@@ -49,6 +49,30 @@ ReWrite ships adapters for every provider listed below, but only some have been 
 | OpenAI-compatible (Ollama, LM Studio) | ✅ Tested (local Ollama) |
 | OpenAI GPT | Untested |
 | Google Gemini | Untested |
+| DeepSeek / Kimi / Qwen / GLM (cloud OpenAI-compatible) | Untested |
+
+## Cloud OpenAI-compatible LLMs (DeepSeek, Kimi, Qwen, GLM)
+
+Many cloud LLM services speak the same `/chat/completions` dialect as OpenAI, so they work through the
+**OpenAI-compatible** LLM provider with no extra setup. In a profile, set LLM provider to "OpenAI-compatible
+(cloud or local)", paste the base URL from the table below, type a model name, and enter your API key.
+
+| Provider | LLM base URL | Example models |
+| --- | --- | --- |
+| DeepSeek | `https://api.deepseek.com/v1` | `deepseek-chat`, `deepseek-reasoner` |
+| Kimi (Moonshot) | `https://api.moonshot.ai/v1` | `kimi-k2-0905-preview`, `moonshot-v1-32k` |
+| Qwen (DashScope) | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | `qwen-max`, `qwen-plus` |
+| Zhipu GLM | `https://open.bigmodel.cn/api/paas/v4` | `glm-4-plus` |
+
+Notes:
+
+- The base URL must include the version path (`/v1`, `/compatible-mode/v1`, etc.); the adapter appends
+  `/chat/completions` to whatever you enter.
+- The OpenAI-compatible provider has no model dropdown or Refresh button, so type the model ID by hand
+  (the dropdowns above are just examples; consult the provider's docs for the current list).
+- The URLs above are the international endpoints. China-region accounts can substitute the mainland
+  endpoints instead, e.g. `https://api.moonshot.cn/v1` (Kimi) and
+  `https://dashscope.aliyuncs.com/compatible-mode/v1` (Qwen).
 
 ## Install
 

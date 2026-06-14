@@ -16,7 +16,7 @@ const TRANSCRIPTION_OPTIONS: Array<{ id: TranscriptionProviderID; label: string;
 const LLM_OPTIONS: Array<{ id: LLMProviderID; label: string }> = [
 	{ id: 'anthropic', label: 'Anthropic Claude' },
 	{ id: 'openai', label: 'OpenAI GPT' },
-	{ id: 'openai-compatible', label: 'OpenAI-compatible (local server)' },
+	{ id: 'openai-compatible', label: 'OpenAI-compatible (cloud or local)' },
 	{ id: 'gemini', label: 'Google Gemini' },
 	{ id: 'mistral', label: 'Mistral' },
 	{ id: 'none', label: 'None (skip cleanup; insert raw text)' },
@@ -138,7 +138,7 @@ export function renderSetupCard(params: SetupCardParams): void {
 		if (profile.llmProvider === 'openai-compatible') {
 			new Setting(card)
 				.setName('LLM base URL')
-				.setDesc('e.g. http://localhost:11434/v1 (Ollama) or http://localhost:1234/v1 (LM Studio)')
+				.setDesc('e.g. https://api.deepseek.com/v1 (cloud) or http://localhost:11434/v1 (Ollama). See README for more OpenAI-compatible providers.')
 				.addText((t) => {
 					t.setValue(profile.llmConfig.baseUrl);
 					t.onChange((v) => {
