@@ -1226,7 +1226,7 @@ function applyModelFieldDesc(
 		return;
 	}
 	const linkLabel = 'list of models';
-	const frag = document.createDocumentFragment();
+	const frag = activeDocument.createDocumentFragment();
 	frag.appendText(text ? `${text} See the ` : 'See the ');
 	const a = frag.createEl('a', { text: linkLabel, href: docsUrl });
 	a.target = '_blank';

@@ -178,12 +178,12 @@ function escapeMultipartName(name: string): string {
 export async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 	abortIfSignaled(signal);
 	await new Promise<void>((resolve, reject) => {
-		const timer = setTimeout(() => {
+		const timer = window.setTimeout(() => {
 			signal?.removeEventListener('abort', onAbort);
 			resolve();
 		}, ms);
 		const onAbort = (): void => {
-			clearTimeout(timer);
+			window.clearTimeout(timer);
 			reject(new DOMException('Aborted', 'AbortError'));
 		};
 		signal?.addEventListener('abort', onAbort, { once: true });

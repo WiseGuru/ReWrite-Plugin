@@ -31,7 +31,7 @@ export class WhisperStatusBar {
 	private refresh(): void {
 		const hidden = this.shouldHide();
 		if (hidden !== this.lastHidden) {
-			this.el.toggleClass('rewrite-hidden', hidden);
+			this.el.toggle(!hidden);
 			this.lastHidden = hidden;
 		}
 		if (hidden) return;

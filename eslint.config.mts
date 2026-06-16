@@ -58,6 +58,10 @@ export default tseslint.config(
 		languageOptions: {
 			globals: {
 				...globals.browser,
+				// Obsidian ambient globals (popout-window aware; declared in obsidian.d.ts,
+				// which TS sees but eslint's no-undef does not).
+				activeDocument: 'readonly',
+				activeWindow: 'readonly',
 			},
 			parserOptions: {
 				projectService: {

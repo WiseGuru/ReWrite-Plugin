@@ -74,6 +74,9 @@ export class Recorder {
 	// not suspend the WebView when the screen would otherwise sleep, which kills capture.
 	private wakeLock: WakeLockSentinelLike | null = null;
 	private visibilityHandler: (() => void) | null = null;
+	// Captured when the visibility listener is registered so removal targets the same
+	// document even if the active (popout) window changes mid-recording.
+	private wakeLockDoc: Document | null = null;
 
 	getState(): RecorderState {
 		return this.state;
@@ -223,12 +226,14 @@ export class Recorder {
 	private startWakeLock(): void {
 		void this.acquireWakeLock();
 		if (this.visibilityHandler) return;
+		const doc = activeDocument;
+		this.wakeLockDoc = doc;
 		this.visibilityHandler = () => {
-			if (document.visibilityState === 'visible' && this.state === 'recording' && !this.wakeLock) {
+			if (doc.visibilityState === 'visible' && this.state === 'recording' && !this.wakeLock) {
 				void this.acquireWakeLock();
 			}
 		};
-		document.addEventListener('visibilitychange', this.visibilityHandler);
+		doc.addEventListener('visibilitychange', this.visibilityHandler);
 	}
 
 	private async acquireWakeLock(): Promise<void> {
@@ -263,8 +268,9 @@ export class Recorder {
 	private stopWakeLock(): void {
 		this.releaseWakeLock();
 		if (this.visibilityHandler) {
-			document.removeEventListener('visibilitychange', this.visibilityHandler);
+			(this.wakeLockDoc ?? activeDocument).removeEventListener('visibilitychange', this.visibilityHandler);
 			this.visibilityHandler = null;
+			this.wakeLockDoc = null;
 		}
 	}
 

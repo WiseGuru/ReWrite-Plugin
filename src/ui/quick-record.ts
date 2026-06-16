@@ -223,10 +223,12 @@ class QuickRecordFloater {
 	private popover: HTMLElement | null = null;
 	private outsideClickHandler: ((e: MouseEvent) => void) | null = null;
 	private keyHandler: ((e: KeyboardEvent) => void) | null = null;
+	// Captured when popover listeners are registered so removal targets the same document.
+	private popoverDoc: Document | null = null;
 	private busy = false;
 
 	constructor(private readonly options: QuickRecordFloaterOptions) {
-		this.el = document.body.createDiv({ cls: 'rewrite-quick-floater' });
+		this.el = activeDocument.body.createDiv({ cls: 'rewrite-quick-floater' });
 		const row = this.el.createDiv({ cls: 'rewrite-quick-row' });
 		row.createSpan({ cls: 'rewrite-quick-dot' });
 		row.createSpan({ cls: 'rewrite-quick-label', text: 'Recording' });
@@ -343,19 +345,23 @@ class QuickRecordFloater {
 		this.keyHandler = (e: KeyboardEvent) => {
 			if (e.key === 'Escape') this.closePopover();
 		};
-		document.addEventListener('click', this.outsideClickHandler, true);
-		document.addEventListener('keydown', this.keyHandler, true);
+		const doc = activeDocument;
+		this.popoverDoc = doc;
+		doc.addEventListener('click', this.outsideClickHandler, true);
+		doc.addEventListener('keydown', this.keyHandler, true);
 	}
 
 	private closePopover(): void {
+		const doc = this.popoverDoc ?? activeDocument;
 		if (this.outsideClickHandler) {
-			document.removeEventListener('click', this.outsideClickHandler, true);
+			doc.removeEventListener('click', this.outsideClickHandler, true);
 			this.outsideClickHandler = null;
 		}
 		if (this.keyHandler) {
-			document.removeEventListener('keydown', this.keyHandler, true);
+			doc.removeEventListener('keydown', this.keyHandler, true);
 			this.keyHandler = null;
 		}
+		this.popoverDoc = null;
 		this.popover?.remove();
 		this.popover = null;
 	}

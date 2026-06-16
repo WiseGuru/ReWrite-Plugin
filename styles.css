@@ -408,10 +408,6 @@
 	background-color: var(--color-red);
 }
 
-.rewrite-hidden {
-	display: none !important;
-}
-
 /* Encryption banner (settings tab) */
 
 .rewrite-encryption-banner {

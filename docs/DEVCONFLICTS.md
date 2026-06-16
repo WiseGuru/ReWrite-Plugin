@@ -25,7 +25,7 @@ Scope: this document identifies conflicts and potential problems. Severity label
 
 - Submission requirement: "If using Node.js packages like `fs`, `crypto`, or `os`, the plugin must be marked as desktop-only."
 - The plugin does this deliberately and defensibly: the Node modules are lazy-`require`d only inside `Platform.isDesktop` guards (the local whisper.cpp host is a desktop-only feature), so mobile never touches them. This is the accepted pattern for a mixed desktop/mobile plugin.
-- Still flag-worthy: automated review and human reviewers frequently catch Node imports in non-desktop-only manifests. Expect to have to justify it. The casts at [src/whisper-host.ts:83-92](../src/whisper-host.ts#L83-L92) (`window.require` / `globalThis.process`) are part of the same pattern.
+- Still flag-worthy: automated review and human reviewers frequently catch Node imports in non-desktop-only manifests. Expect to have to justify it. The casts in `getNodeApi()` ([src/whisper-host.ts](../src/whisper-host.ts), `window.require` / `window.process`) are part of the same pattern.
 
 > **Resolution: Accepted as-is.** `isDesktopOnly` stays `false` so mobile keeps the cloud-provider features; Node modules are lazy-`require`d only inside `Platform.isDesktop` guards (the local whisper.cpp host), so mobile never loads them. The README already discloses the desktop-only host. This is the documented pattern for a mixed desktop/mobile plugin; be ready to explain it in review.
 
@@ -103,7 +103,7 @@ For the record, these commonly-flagged items were checked and are compliant:
 - **`normalizePath`** is used consistently for user-supplied paths.
 - **Resource cleanup**: `registerEvent` / `registerInterval` used; the one manual DOM element (Quick Record floater) is torn down in `onunload`.
 - **Settings headings**: routed through a `setHeading()` helper, no manual `<h2>`, no top-level "Settings"/plugin-name heading.
-- **Sentence case** in UI text and command names; the one `eslint-disable obsidianmd/ui/sentence-case` ([src/ui/passphrase-modal.ts:160](../src/ui/passphrase-modal.ts#L160)) is a legitimate exemption for a literal random-string example.
+- **Sentence case** in UI text and command names; the codebase carries no `eslint-disable` directives (the former sentence-case exemption for a random-string example in [src/ui/passphrase-modal.ts](../src/ui/passphrase-modal.ts) was replaced by passing the string through a variable, which the rule does not inspect).
 - **Manifest description**: action-focused, ends with a period, under 250 characters, no emoji.
 - **Network-use disclosure** (developer policy): the README states keys are user-supplied, "Nothing is sent to a ReWrite server," and lists every provider endpoint.
 - **No telemetry, no ads, no self-update mechanism, no code obfuscation** (developer policy prohibitions).

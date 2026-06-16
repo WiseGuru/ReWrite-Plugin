@@ -79,9 +79,7 @@ function getNodeApi(): NodeAPI | null {
 		return null;
 	}
 	try {
-		const req =
-			(window as unknown as { require?: (m: string) => unknown }).require ??
-			(globalThis as unknown as { require?: (m: string) => unknown }).require;
+		const req = (window as unknown as { require?: (m: string) => unknown }).require;
 		if (typeof req !== 'function') {
 			nodeApiCache = null;
 			return null;
@@ -89,7 +87,7 @@ function getNodeApi(): NodeAPI | null {
 		const cp = req('child_process') as ChildProcessAPI;
 		const net = req('net') as NetAPI;
 		const fs = req('fs') as FsAPI;
-		const proc = (globalThis as unknown as { process?: ProcessAPI }).process;
+		const proc = (window as unknown as { process?: ProcessAPI }).process;
 		if (!proc || typeof proc.kill !== 'function') {
 			nodeApiCache = null;
 			return null;
@@ -308,7 +306,7 @@ export class WhisperHost {
 				};
 				child.once('exit', finish);
 				try { child.kill(); } catch { /* best effort */ }
-				setTimeout(() => {
+				window.setTimeout(() => {
 					try { child.kill('SIGKILL'); } catch { /* best effort */ }
 					finish();
 				}, STOP_KILL_GRACE_MS);
@@ -511,5 +509,5 @@ function isPortReachable(net: NetAPI, port: number): Promise<boolean> {
 }
 
 function delay(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
+	return new Promise((resolve) => window.setTimeout(resolve, ms));
 }

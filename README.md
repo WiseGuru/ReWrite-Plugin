@@ -371,6 +371,10 @@ Obsidian on iOS and Android runs in a constrained WebView. A few things behave d
 - The OpenAI-compatible transcription endpoint expects a server that mirrors Whisper's `/v1/audio/transcriptions` shape (whisper.cpp, faster-whisper-server). The OpenAI-compatible LLM endpoint expects a `/chat/completions` shape (Ollama, LM Studio, etc.).
 - Anthropic Claude calls go through Obsidian's `requestUrl`, which bypasses browser CORS. If you reuse the same endpoint from another tool that uses `fetch`, you will need their browser-direct-access header.
 
+## Vault access
+
+ReWrite lists the files in your vault for two features: finding audio files you can reprocess, and falling back to your most recently edited note when you run an insert with no editor open. It uses these listings for file paths only; it never reads a note's contents except the specific note or selection you act on, and it only writes the notes (and saved-audio attachments) produced by a run you trigger.
+
 ## Acknowledgements
 
 - [Magic Mic](https://github.com/drewmcdonald/obsidian-magic-mic) by Drew McDonald (MIT, archived): originator of the MIME-type fallback and `MediaRecorder` patterns this plugin borrows.
@@ -379,4 +383,4 @@ Obsidian on iOS and Android runs in a constrained WebView. A few things behave d
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+0BSD. See [LICENSE](LICENSE).
