@@ -27,7 +27,9 @@ The tag name must equal `manifest.json`'s `version` exactly. `.npmrc` already pi
 
 - **No `v` in the tag.** The release tag must match `manifest.json` `version` character-for-character: `1.0.1`, never `v1.0.1`.
 - **Three loose asset files.** `main.js`, `manifest.json`, `styles.css` attached as individual binary assets, never zipped. The workflow does this; do not hand-upload.
-- **A new release needs a new version number.** Obsidian's automated review only registers a change when the version increments. Re-pushing the same version does not count as a new submission. Bump the patch/minor/major rather than overwriting a published version.
+- **A new release needs a new version number.** Obsidian's automated review only registers a change when the version increments. Re-pushing the same version does not count as a new submission. Bump the patch/minor/major rather than overwriting a published version. (To address review feedback, update the repo and publish a new GitHub release with an incremented version.)
+- **Version format is `x.y.z` only.** Semantic Versioning, no pre-release suffixes (no `1.0.0-beta`, no build metadata). The initial release is `1.0.0`.
+- **The directory reads `manifest.json` at the HEAD of your default branch** (`master`), not just the release asset. Keep master's `manifest.json` correct and in sync with the released version.
 - **`minAppVersion` must be >= the highest `@since` of every Obsidian API you call directly** (anything not behind a runtime feature-detect). Check `node_modules/obsidian/obsidian.d.ts` for the `@since` of new APIs. Example from this project: `FileManager.processFrontMatter` is `@since 1.4.4`, which is why `minAppVersion` is `1.4.4`. Feature-detected APIs (like `app.secretStorage`) do not raise the floor.
 - **`versions.json` maps plugin version -> minAppVersion.** Our [version-bump.mjs](../version-bump.mjs) only adds a new line when the `minAppVersion` value is not already present (i.e. when the floor actually changes). That is valid: Obsidian reads the latest version straight from the release `manifest.json`, and consults `versions.json` only to find the newest plugin version compatible with an older app. If you raise `minAppVersion`, confirm a new `versions.json` entry was written; if you keep it, no new line is expected.
 - **Public repo + LICENSE.** The repo must be public to be listed, with a real LICENSE whose copyright holder is correct (this plugin is 0BSD). The README must disclose network use, and `manifest.json` carries `author`, `authorUrl`, and (if you take donations) `fundingUrl`.
@@ -63,7 +65,15 @@ On any pushed tag, [.github/workflows/release.yml](../.github/workflows/release.
 3. `actions/attest-build-provenance@v2` over the three assets (cryptographic provenance proving they were built from source),
 4. `softprops/action-gh-release@v2` publishes/updates the release for that tag with the three assets.
 
-It runs with `permissions: contents: write, id-token: write, attestations: write`. If you ever change the workflow, keep all three permissions or attestation fails.
+It runs with `permissions: contents: write, id-token: write, attestations: write`. If you ever change the workflow, keep all three permissions or attestation fails. The workflow also relies on the repo allowing Actions to write: **Settings -> Actions -> General -> Workflow permissions -> Read and write permissions** must be enabled (the per-job `permissions` block sets the token scopes, but the repo-level toggle must also permit it).
+
+**Difference from Obsidian's sample workflow.** The official guide ([Release your plugin with GitHub Actions](https://docs.obsidian.md/Plugins/Releasing/Release+your+plugin+with+GitHub+Actions)) uses the GitHub CLI to create a **draft** release that you publish manually after adding notes:
+
+```bash
+gh release create "$tag" --title="$tag" --draft main.js manifest.json styles.css
+```
+
+Ours intentionally diverges: it **auto-publishes** (no manual step) and **adds build-provenance attestations**, which the sample does not. If you ever want the draft-and-review-notes flow instead, switch the publish step back to the `gh release create ... --draft` form, but you then lose attestation unless you keep the attest step.
 
 ## Verify (after pushing the tag)
 
@@ -89,4 +99,51 @@ For anything the community review should notice, cut a new version instead.
 
 ## Submitting to the community list (first time only)
 
-After a clean, attested release exists on a public repo, open a PR against [obsidianmd/obsidian-releases](https://github.com/obsidianmd/obsidian-releases) adding an entry to `community-plugins.json` with `id`, `name`, `author`, `description`, and `repo` set to `WiseGuru/ReWrite-Voice-Notes`. The automated reviewer runs the same checks in the conflict checklist above against your latest release.
+Prerequisites: a public repo containing `README.md`, `LICENSE`, and `manifest.json`, plus at least one published GitHub release whose tag matches the manifest version and carries `main.js` / `manifest.json` / `styles.css`.
+
+The documented path is the web form, not a manual `community-plugins.json` PR:
+
+1. Sign in at [community.obsidian.md](https://community.obsidian.md) with your Obsidian account.
+2. Link your GitHub account to your profile.
+3. **Plugins -> New plugin**, enter your repository URL.
+4. Agree to the Developer policies, then **Submit**.
+
+Notes:
+
+- The directory processes the `manifest.json` at the **HEAD of your default branch**, so master must be correct.
+- The `id` must be unique across all published plugins and must not contain `obsidian` (and, per the manifest rules, must not end in `plugin`).
+- When a user installs, Obsidian downloads `main.js`, `manifest.json`, and `styles.css` from the GitHub release.
+- An automated reviewer runs the checks in the conflict checklist above. To address feedback, update the repo and publish a new GitHub release with an incremented version (do not reuse a version).
+
+## Submission requirements (verify before submitting)
+
+From [Submission requirements for plugins](https://docs.obsidian.md/Plugins/Releasing/Submission+requirements+for+plugins):
+
+- **Remove all sample/template code** (leftover from `obsidian-sample-plugin`); rename placeholder classes.
+- **Command IDs must not include the plugin id** (Obsidian auto-prefixes them with the id).
+- **`isDesktopOnly: true`** if the plugin uses Node.js/Electron APIs (`fs`, `crypto`, `os`, `child_process`, etc.). We keep it `false` and lazy-load Node modules only behind `Platform.isDesktop` for the desktop-only whisper host, which is the accepted mixed pattern but is worth re-justifying each review.
+- **`description`**: action-focused (not "This is a plugin..."), <= 250 chars, ends with a period, no emoji, correct casing for brands/acronyms.
+- **`fundingUrl`**: include only if you actually accept donations.
+- **`minAppVersion`**: a real minimum; if unsure, the latest stable build.
+
+## Broader plugin guidelines (continuous, re-check before release)
+
+From [Plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines). Most are already satisfied; treat this as a regression guard for new code:
+
+- Use `this.app`, never the global `app` / `window.app`. Keep console output to errors only.
+- Settings tab: no top-level/plugin-name heading, no the word "settings" in section names, use `setHeading()` (we wrap this in `sectionHeading()`).
+- DOM: never `innerHTML` / `outerHTML` / `insertAdjacentHTML`; build with `createEl` / `createDiv` / `createSpan`; clear with `el.empty()`.
+- Clean up on unload via `registerEvent` / `registerInterval` / `registerDomEvent`; do not detach leaves in `onunload`.
+- Commands: no default hotkeys; `callback` vs `checkCallback` vs `editorCheckCallback` chosen to match whether the command needs an editor.
+- Workspace/vault: `getActiveViewOfType(MarkdownView)` over `activeLeaf`; `Vault.process` over `Vault.modify` for background read-modify-write (Editor API for the active file); `FileManager.processFrontMatter` for frontmatter; prefer `app.vault` over `app.vault.adapter` except for plugin-config files; `getFileByPath` / `getAbstractFileByPath` over iterating; `normalizePath` on all constructed paths.
+- Styling: no hardcoded `el.style`, no `!important`; use CSS classes + Obsidian CSS variables (`--text-muted`, etc.).
+- Mobile/popout: avoid Node/Electron APIs on mobile; avoid lookbehind in regexes; use `activeDocument` / `activeWindow` and `window.setTimeout` for popout-window safety (avoid bare `globalThis`).
+- TypeScript: `const` / `let` (no `var`), `async` / `await` over raw Promise chains.
+
+## Canonical Obsidian docs
+
+- [Release your plugin with GitHub Actions](https://docs.obsidian.md/Plugins/Releasing/Release+your+plugin+with+GitHub+Actions)
+- [Submit your plugin](https://docs.obsidian.md/Plugins/Releasing/Submit+your+plugin)
+- [Submission requirements for plugins](https://docs.obsidian.md/Plugins/Releasing/Submission+requirements+for+plugins)
+- [Plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines)
+- [Developer policies](https://docs.obsidian.md/Developer+policies)
