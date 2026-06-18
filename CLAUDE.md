@@ -28,6 +28,8 @@ npm version <patch|minor|major>  # bumps manifest.json + versions.json via versi
 
 There is no test runner configured. Verification is `npm run build && npm run lint` (CI parity) plus the manual checklist in [obsidian-voice-notes-spec.md](obsidian-voice-notes-spec.md) (lines 454-476).
 
+To publish a new version, follow [docs/RELEASING.md](docs/RELEASING.md) (version bump + bare-version tag + CI-built, attested assets; do not hand-upload).
+
 CI ([.github/workflows/lint.yml](.github/workflows/lint.yml)) runs `npm ci`, `npm run build`, and `npm run lint` on Node 20.x and 22.x for every push/PR.
 
 ## Build architecture
@@ -283,7 +285,7 @@ Per [.editorconfig](.editorconfig): tabs (width 4), LF, UTF-8, final newline. Ma
 - **Keep [src/main.ts](src/main.ts) minimal**: only plugin lifecycle, command registration, settings tab registration. Feature logic belongs in dedicated modules.
 - **Defer heavy work**: no long tasks in `onload`. Providers/recorders lazy-init when first used.
 - **Network policy**: provider calls go to user-configured endpoints with user-provided keys. No telemetry, no auto-update of plugin code, no `fetch`+`eval`.
-- **Releases**: GitHub release tag must exactly match `manifest.json`'s `version` (no leading `v`). Attach `main.js`, `manifest.json`, `styles.css` as individual binary assets (not zipped). This is automated by [.github/workflows/release.yml](.github/workflows/release.yml): pushing a version tag builds the bundle, runs `actions/attest-build-provenance` (GitHub artifact attestations for provenance), and publishes the assets via `softprops/action-gh-release`. To cut a release, push a tag named exactly the version; do not hand-upload assets (that loses attestation).
+- **Releases**: GitHub release tag must exactly match `manifest.json`'s `version` (no leading `v`). Attach `main.js`, `manifest.json`, `styles.css` as individual binary assets (not zipped). This is automated by [.github/workflows/release.yml](.github/workflows/release.yml): pushing a version tag builds the bundle, runs `actions/attest-build-provenance` (GitHub artifact attestations for provenance), and publishes the assets via `softprops/action-gh-release`. To cut a release, push a tag named exactly the version; do not hand-upload assets (that loses attestation). **Before publishing any release, follow [docs/RELEASING.md](docs/RELEASING.md)** for the full step-by-step (version bump, tag, push, verify) and the guideline-conflict checklist that keeps the Obsidian community review green.
 
 ## Gotchas
 
